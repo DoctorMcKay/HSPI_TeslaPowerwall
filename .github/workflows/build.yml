@@ -1,0 +1,41 @@
+name: CI
+
+on: [push]
+
+jobs:
+  build:
+
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v1
+    
+    - name: Setup msbuild
+      uses: warrenbuckley/Setup-MSBuild@v1
+      
+    - name: Setup nuget
+      uses: warrenbuckley/Setup-Nuget@v1
+      
+    - name: Nuget restore
+      run: nuget restore HSPI_TeslaPowerwall.sln
+      
+    - name: MSBuild
+      run: |
+        msbuild /p:Configuration=Debug HSPI_TeslaPowerwall.sln
+        msbuild /p:Configuration=Release HSPI_TeslaPowerwall.sln
+        
+    - name: Stage artifacts
+      run: |
+        mkdir artifacts
+        cp bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
+        mkdir "artifacts\Debug Build"
+        cp bin\Debug\HSPI_TeslaPowerwall.exe "artifacts\Debug Build\HSPI_TeslaPowerwall.exe"
+        echo %GITHUB_SHA% > artifacts\CommitHash.txt
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v1
+      with:
+        name: Plugin
+        path: artifacts
+
+
