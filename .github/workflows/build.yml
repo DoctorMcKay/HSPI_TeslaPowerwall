@@ -27,9 +27,9 @@ jobs:
     - name: Stage artifacts
       run: |
         mkdir artifacts
-        cp bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
+        cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
         mkdir "artifacts\Debug Build"
-        cp bin\Debug\HSPI_TeslaPowerwall.exe "artifacts\Debug Build\HSPI_TeslaPowerwall.exe"
+        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts\Debug Build\HSPI_TeslaPowerwall.exe"
         echo %GITHUB_SHA% > artifacts\CommitHash.txt
     
     - name: Upload artifacts
