@@ -30,7 +30,6 @@ jobs:
         cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
         mkdir "artifacts\Debug Build"
         cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts\Debug Build\HSPI_TeslaPowerwall.exe"
-        echo %GITHUB_SHA% > artifacts\CommitHash.txt
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v1
