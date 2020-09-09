@@ -148,7 +148,7 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		public override string PostBackProc(string page, string data, string user, int userRights) {
-			Program.WriteLog(LogType.Debug, $"PostBackProc page name {page} by user {user} with rights {userRights}");
+			Program.WriteLog(LogType.Verbose, $"PostBackProc page name {page} by user {user} with rights {userRights}");
 			if (page != "TeslaPowerwallSettings") {
 				return "Unknown page " + page;
 			}
@@ -543,7 +543,7 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		private async void UpdateDeviceData() {
-			Program.WriteLog(LogType.Debug, "Retrieving Powerwall data");
+			Program.WriteLog(LogType.Verbose, "Retrieving Powerwall data");
 
 			SiteMaster siteMaster;
 			Aggregates aggregates;
@@ -559,7 +559,7 @@ namespace HSPI_TeslaPowerwall
 				return;
 			}
 
-			Program.WriteLog(LogType.Debug, "Powerwall data retrieved successfully");
+			Program.WriteLog(LogType.Verbose, "Powerwall data retrieved successfully");
 
 			hs.SetDeviceValueByRef(this._devRefSet.Root, siteMaster.Running ? 1 : 0, true);
 			hs.SetDeviceValueByRef(this._devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0, true);
