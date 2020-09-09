@@ -185,8 +185,6 @@ namespace HSPI_TeslaPowerwall
 			DeviceClass rootDevice;
 
 			if (refSet.Root == -1) {
-				Program.WriteLog(LogType.Info, $"Creating HS3 devices for gateway {addressBase} ({siteName})");
-
 				int hsRef = hs.NewDeviceRef(siteName);
 				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
 				InitializeDevice(device, addressBase, null, null);
@@ -222,8 +220,11 @@ namespace HSPI_TeslaPowerwall
 				
 				refSet.Root = hsRef;
 				rootDevice = device;
+				
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for gateway {addressBase} ({siteName})");
 			} else {
 				rootDevice = (DeviceClass) hs.GetDeviceByRef(refSet.Root);
+				Program.WriteLog(LogType.Info, $"Found root device {refSet.Root} for gateway {addressBase} ({siteName})");
 			}
 
 			if (refSet.ConnectedToTesla == -1) {
@@ -261,6 +262,7 @@ namespace HSPI_TeslaPowerwall
 				});
 
 				refSet.ConnectedToTesla = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for ConnectedToTesla");
 			}
 			
 			if (refSet.GridStatus == -1) {
@@ -298,6 +300,7 @@ namespace HSPI_TeslaPowerwall
 				});
 
 				refSet.GridStatus = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for GridStatus");
 			}
 			
 			if (refSet.ChargePercent == -1) {
@@ -352,6 +355,7 @@ namespace HSPI_TeslaPowerwall
 				});
 
 				refSet.ChargePercent = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for ChargePercent");
 			}
 
 			if (refSet.SitePower == -1) {
@@ -391,6 +395,7 @@ namespace HSPI_TeslaPowerwall
 				});
 				
 				refSet.SitePower = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for SitePower");
 			}
 			
 			if (refSet.BatteryPower == -1) {
@@ -430,6 +435,7 @@ namespace HSPI_TeslaPowerwall
 				});
 				
 				refSet.BatteryPower = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for BatteryPower");
 			}
 			
 			if (refSet.SolarPower == -1) {
@@ -469,6 +475,7 @@ namespace HSPI_TeslaPowerwall
 				});
 				
 				refSet.SolarPower = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for SolarPower");
 			}
 			
 			if (refSet.GridPower == -1) {
@@ -508,6 +515,7 @@ namespace HSPI_TeslaPowerwall
 				});
 				
 				refSet.GridPower = hsRef;
+				Program.WriteLog(LogType.Info, $"Created device {hsRef} for GridPower");
 			}
 
 			this._devRefSet = refSet;
