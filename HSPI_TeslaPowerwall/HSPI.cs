@@ -5,6 +5,7 @@ using System.Timers;
 using HomeSeer.Jui.Views;
 using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices;
+using HomeSeer.PluginSdk.Energy;
 using HomeSeer.PluginSdk.Logging;
 
 namespace HSPI_TeslaPowerwall
@@ -20,6 +21,7 @@ namespace HSPI_TeslaPowerwall
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
 		private GatewayDeviceRefSet _devRefSet;
+		private EnergyValues? _previousEnergyValues = null;
 		private Timer _pollTimer;
 		private bool _debugLogging = false;
 
@@ -349,6 +351,58 @@ namespace HSPI_TeslaPowerwall
 			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.GridPower, Math.Round(aggregates.Site.InstantPower));
 			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
+			
+			// TODO Incomplete code follows
+
+			EnergyValues values = new EnergyValues {
+				Timestamp = DateTime.Now,
+				Battery = Math.Max(0, (int) Math.Round(aggregates.Battery.InstantPower)),
+				Grid = (int) Math.Round(aggregates.Site.InstantPower),
+				Solar = Math.Max(0, (int) Math.Round(aggregates.Solar.InstantPower))
+			};
+
+			if (_previousEnergyValues == null) {
+				_previousEnergyValues = values;
+				return;
+			}
+
+			EnergyValues prevValues = (EnergyValues) _previousEnergyValues;
+			_previousEnergyValues = values;
+
+			double timeDiffSeconds = ((double) (values.Timestamp.Ticks - prevValues.Timestamp.Ticks)) / 10000000;
+
+			HomeSeerSystem.Energy_AddData(_devRefSet.BatteryPower,
+				new EnergyData(Constants.enumEnergyDirection.Consumed) {
+					Amount = prevValues.Battery,
+					Amount_Start = prevValues.Timestamp,
+					Amount_End = values.Timestamp,
+					Device = Constants.enumEnergyDevice.Other,
+					Direction = Constants.enumEnergyDirection.Consumed,
+					dvRef = _devRefSet.BatteryPower,
+					Rate = (float) (prevValues.Battery * (timeDiffSeconds / (60 * 60))) / 1000
+				});
+			
+			HomeSeerSystem.Energy_AddData(_devRefSet.SolarPower,
+				new EnergyData(Constants.enumEnergyDirection.Produced) {
+					Amount = prevValues.Solar,
+					Amount_Start = prevValues.Timestamp,
+					Amount_End = values.Timestamp,
+					Device = Constants.enumEnergyDevice.Solar_Panel,
+					Direction = Constants.enumEnergyDirection.Produced,
+					dvRef = _devRefSet.SolarPower,
+					Rate = (float) (prevValues.Solar * (timeDiffSeconds / (60 * 60))) / 1000
+				});
+			
+			HomeSeerSystem.Energy_AddData(_devRefSet.GridPower,
+				new EnergyData(Constants.enumEnergyDirection.Consumed) {
+					Amount = prevValues.Grid,
+					Amount_Start = prevValues.Timestamp,
+					Amount_End = values.Timestamp,
+					Device = Constants.enumEnergyDevice.Utility,
+					Direction = Constants.enumEnergyDirection.Consumed,
+					dvRef = _devRefSet.GridPower,
+					Rate = (float) (prevValues.Grid * (timeDiffSeconds / (60 * 60))) / 1000
+				});
 		}
 
 		private string GetPowerString(double watts) {
@@ -377,8 +431,7 @@ namespace HSPI_TeslaPowerwall
 		}
 	}
 
-	public struct GatewayDeviceRefSet
-	{
+	public struct GatewayDeviceRefSet {
 		public int Root;
 		public int SystemStatus;
 		public int ConnectedToTesla;
@@ -388,5 +441,12 @@ namespace HSPI_TeslaPowerwall
 		public int BatteryPower;
 		public int SolarPower;
 		public int GridPower;
+	}
+
+	public struct EnergyValues {
+		public DateTime Timestamp;
+		public int Grid;
+		public int Battery;
+		public int Solar;
 	}
 }
