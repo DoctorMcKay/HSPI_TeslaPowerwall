@@ -32,17 +32,13 @@
         <WarningLevel>4</WarningLevel>
     </PropertyGroup>
     <ItemGroup>
-        <Reference Include="HomeSeerAPI, Version=1.0.2.1, Culture=neutral, PublicKeyToken=null">
-          <HintPath>..\packages\homeseer.1.2.7\lib\net45\HomeSeerAPI.dll</HintPath>
-          <Private>True</Private>
-        </Reference>
-        <Reference Include="HSCF, Version=1.0.0.2, Culture=neutral, PublicKeyToken=null">
-          <HintPath>..\packages\homeseer.1.2.7\lib\net45\HSCF.dll</HintPath>
-          <Private>True</Private>
-        </Reference>
         <Reference Include="Microsoft.CSharp" />
-        <Reference Include="Scheduler, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null">
-          <HintPath>..\packages\homeseer.1.2.7\lib\net45\Scheduler.dll</HintPath>
+        <Reference Include="Newtonsoft.Json, Version=12.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed">
+          <HintPath>..\packages\Newtonsoft.Json.12.0.3\lib\net45\Newtonsoft.Json.dll</HintPath>
+          <Private>True</Private>
+        </Reference>
+        <Reference Include="PluginSdk, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null">
+          <HintPath>..\packages\HomeSeer-PluginSDK.1.2.0\lib\net462\PluginSdk.dll</HintPath>
           <Private>True</Private>
         </Reference>
         <Reference Include="System" />
@@ -55,7 +51,6 @@
     </ItemGroup>
     <ItemGroup>
         <Compile Include="HSPI.cs" />
-        <Compile Include="HspiBase.cs" />
         <Compile Include="PowerwallClient.cs" />
         <Compile Include="Program.cs" />
         <Compile Include="Properties\AssemblyInfo.cs" />

@@ -1,8 +1,6 @@
-﻿using System;
-using System.Net.Http;
+﻿using System.Net.Http;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
-using Scheduler;
 
 namespace HSPI_TeslaPowerwall
 {
@@ -13,10 +11,10 @@ namespace HSPI_TeslaPowerwall
         private readonly JavaScriptSerializer _jsonSerializer;
 
         public PowerwallClient(string ipAddress) {
-            this._ipAddress = ipAddress;
+            _ipAddress = ipAddress;
             HttpClientHandler handler = new HttpClientHandler();
-            this._httpClient = new HttpClient(handler);
-            this._jsonSerializer = new JavaScriptSerializer();
+            _httpClient = new HttpClient(handler);
+            _jsonSerializer = new JavaScriptSerializer();
 
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
             handler.ServerCertificateCustomValidationCallback =

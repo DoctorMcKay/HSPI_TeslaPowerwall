@@ -1,553 +1,301 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
-using System.Diagnostics;
-using System.Linq;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Timers;
-using System.Web;
-using HomeSeerAPI;
-using Scheduler;
-using Scheduler.Classes;
+using HomeSeer.Jui.Views;
+using HomeSeer.PluginSdk;
+using HomeSeer.PluginSdk.Devices;
 
 namespace HSPI_TeslaPowerwall
 {
 	// ReSharper disable once InconsistentNaming
-	public class HSPI : HspiBase
+	public class HSPI : AbstractPlugin
 	{
 		public const string PLUGIN_NAME = "Tesla Powerwall";
+		public override string Name { get; } = PLUGIN_NAME;
+		public override string Id { get; } = PLUGIN_NAME;
 
+		private readonly Regex _ipRegex = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
 		private GatewayDeviceRefSet _devRefSet;
 		private Timer _pollTimer;
-		private IPlugInAPI.enumInterfaceStatus _interfaceStatus = IPlugInAPI.enumInterfaceStatus.OK;
-		private string _interfaceStatusString = "";
 
-		public HSPI() {
-			Name = PLUGIN_NAME;
-			PluginIsFree = true;
-		}
+		protected override void Initialize() {
+			Program.WriteLog(LogType.Verbose, "Initialize");
+			
+			// Build the settings page
+			PageFactory settingsPageFactory = PageFactory
+				.CreateSettingsPage("TeslaPowerwallSettings", "Tesla Powerwall Settings")
+				.WithLabel(
+					"gateway_ip_label",
+					"<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">Support and Documentation</a>",
+					"Enter the LAN IP address of your Tesla Backup Gateway."
+				)
+				.WithInput("gateway_ip", "Gateway IP");
+			
+			Settings.Add(settingsPageFactory.Page);
 
-		public override string InitIO(string port) {
-			Program.WriteLog(LogType.Verbose, "InitIO");
-
-			hs.RegisterPage("TeslaPowerwallSettings", Name, InstanceFriendlyName());
-			WebPageDesc configLink = new WebPageDesc {
-				plugInName = Name,
-				plugInInstance = InstanceFriendlyName(),
-				link = "TeslaPowerwallSettings",
-				linktext = "Settings",
-				order = 1,
-				page_title = "Tesla Powerwall Settings"
-			};
-			callbacks.RegisterConfigLink(configLink);
-			callbacks.RegisterLink(configLink);
+			Status = PluginStatus.Ok();
 			
 			CheckGatewayConnection();
-			return "";
 		}
 
-		public override IPlugInAPI.strInterfaceStatus InterfaceStatus()
-		{
-			return new IPlugInAPI.strInterfaceStatus
-				{intStatus = this._interfaceStatus, sStatus = this._interfaceStatusString};
+		protected override void OnSettingsLoad() {
+			Settings.Pages[0].GetViewById("gateway_ip").UpdateValue(_gatewayIp);
+		}
+
+		protected override bool OnSettingChange(string pageId, AbstractView currentView, AbstractView changedView) {
+			Program.WriteLog(LogType.Verbose, $"Request to save setting {currentView.Id} on page {pageId}");
+
+			if (pageId != "TeslaPowerwallSettings") {
+				Program.WriteLog(LogType.Warn, $"Request to save settings on unknown page {pageId}!");
+				return true;
+			}
+
+			if (currentView.Id == "gateway_ip") {
+				// We want to update the gateway IP. Firstly, did it change?
+				string newValue = changedView.GetStringValue();
+				if (newValue == currentView.GetStringValue()) {
+					return true; // no change
+				}
+				
+				// Make sure it's a valid IP format
+				if (newValue == "" || _ipRegex.Matches(newValue).Count > 0) {
+					HomeSeerSystem.SaveINISetting("GatewayNetwork", "ip", newValue, SettingsFileName);
+					CheckGatewayConnection();
+					return true;
+				}
+
+				throw new Exception("Invalid IP address format.");
+			}
+			
+			Program.WriteLog(LogType.Verbose, $"Request to save unknown setting {currentView.Id}");
+			return true;
+		}
+
+		protected override void BeforeReturnStatus() {
+			// Nothing happens here as we update the status as events happen
 		}
 
 		private async void CheckGatewayConnection() {
-			this._pollTimer?.Stop();
+			_pollTimer?.Stop();
 			
-			this._gatewayIp = hs.GetINISetting("GatewayNetwork", "ip", "", IniFilename);
+			_gatewayIp = HomeSeerSystem.GetINISetting("GatewayNetwork", "ip", "", SettingsFileName);
 
 			Program.WriteLog(LogType.Info, $"Attempting to connect to Gateway at IP \"{this._gatewayIp}\"");
-
-			Regex ipRgx = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
-			if (ipRgx.Matches(_gatewayIp).Count == 0) {
-				this._interfaceStatus = IPlugInAPI.enumInterfaceStatus.FATAL;
-				this._interfaceStatusString = "No Tesla Gateway IP address configured";
+			
+			if (_ipRegex.Matches(_gatewayIp).Count == 0) {
+				Status = PluginStatus.Fatal("No Tesla Gateway IP address configured");
 				return;
 			}
 			
-			this._client = new PowerwallClient(this._gatewayIp);
+			_client = new PowerwallClient(_gatewayIp);
 
-			try
-			{
-				SiteInfo info = await this._client.GetSiteInfo();
+			try {
+				SiteInfo info = await _client.GetSiteInfo();
 				// It worked!
-				this._interfaceStatus = IPlugInAPI.enumInterfaceStatus.OK;
-				this._interfaceStatusString = "";
+				Status = PluginStatus.Ok();
 				Program.WriteLog(LogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at IP {this._gatewayIp}");
 				FindDevices(info.Name);
 
-				this._pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
-				this._pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { UpdateDeviceData(); };
-			}
-			catch (Exception ex)
-			{
+				_pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
+				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { UpdateDeviceData(); };
+			} catch (Exception ex) {
 				Program.WriteLog(LogType.Error, $"Cannot get site master from Gateway {this._gatewayIp}: {ex.Message}");
-				this._interfaceStatus = IPlugInAPI.enumInterfaceStatus.FATAL;
-				this._interfaceStatusString = "Cannot contact Gateway";
+				Status = PluginStatus.Fatal("Cannot contact Gateway");
 
-				this._pollTimer = new Timer(60000) {Enabled = true};
-				this._pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { CheckGatewayConnection(); };
+				_pollTimer = new Timer(60000) {Enabled = true};
+				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { CheckGatewayConnection(); };
 			}
-		}
-
-		public override string GetPagePlugin(string pageName, string user, int userRights, string queryString) {
-			Program.WriteLog(LogType.Verbose, $"Requested page name {pageName} by user {user} with rights {userRights}");
-
-			switch (pageName) {
-				case "TeslaPowerwallSettings":
-					return BuildSettingsPage(user, userRights, queryString);
-			}
-
-			return "";
-		}
-
-		private string BuildSettingsPage(string user, int userRights, string queryString, string messageBox = null, string messageBoxClass = null) {
-			const string pageName = "TeslaPowerwallSettings";
-			PageBuilderAndMenu.clsPageBuilder builder = new PageBuilderAndMenu.clsPageBuilder(pageName);
-			if ((userRights & 2) != 2) {
-				// User is not an admin
-				builder.reset();
-				builder.AddHeader(hs.GetPageHeader(pageName, "Tesla Powerwall Settings", "", "", false, true));
-				builder.AddBody("<p><strong>Access Denied:</strong> You are not an administrative user.</p>");
-				builder.AddFooter(hs.GetPageFooter());
-				builder.suppressDefaultFooter = true;
-
-				return builder.BuildPage();
-			}
-
-			StringBuilder sb = new StringBuilder();
-
-			sb.Append(PageBuilderAndMenu.clsPageBuilder.FormStart("tesla_powerwall_config_form", "tesla_powerwall_config_form", "post"));
-			sb.Append("<table width=\"1000px\" cellspacing=\"0\"><tr><td class=\"tableheader\" colspan=\"3\">Settings</td></tr>");
-			
-			sb.Append("<tr><td class=\"tablecell\" style=\"width:200px\" align=\"left\">Gateway Network IP:</td>");
-			sb.Append("<td class=\"tablecell\">");
-			clsJQuery.jqTextBox textBox = new clsJQuery.jqTextBox("GatewayIP", "text", this._gatewayIp, pageName, 30, true);
-			sb.Append(textBox.Build());
-			sb.Append("</td></tr>");
-
-			sb.Append("</table>");
-
-			clsJQuery.jqButton doneBtn = new clsJQuery.jqButton("DoneBtn", "Done", pageName, false);
-			doneBtn.url = "/";
-			sb.Append("<br />");
-			sb.Append(doneBtn.Build());
-			sb.Append("<br /><br />");
-
-			builder.reset();
-			builder.AddHeader(hs.GetPageHeader(pageName, "Tesla Powerwall Settings", "", "", false, true));
-			builder.AddBody(sb.ToString());
-			builder.AddFooter(hs.GetPageFooter());
-			builder.suppressDefaultFooter = true;
-
-			return builder.BuildPage();
-		}
-
-		public override string PostBackProc(string page, string data, string user, int userRights) {
-			Program.WriteLog(LogType.Verbose, $"PostBackProc page name {page} by user {user} with rights {userRights}");
-			if (page != "TeslaPowerwallSettings") {
-				return "Unknown page " + page;
-			}
-
-			if ((userRights & 2) != 2) {
-				return "Access denied: you are not an administrative user.";
-			}
-
-			NameValueCollection postData = HttpUtility.ParseQueryString(data);
-
-			string gwIp = postData.Get("GatewayIP");
-			hs.SaveINISetting("GatewayNetwork", "ip", gwIp, IniFilename);
-			this._gatewayIp = gwIp;
-			Program.WriteLog(LogType.Info, $"Updating Gateway IP to \"{gwIp}\"");
-			CheckGatewayConnection();
-
-			return "";
 		}
 
 		private void FindDevices(string siteName) {
-			string addressBase = $"TGW:{this._gatewayIp}";
-			GatewayDeviceRefSet refSet = new GatewayDeviceRefSet
-			{
-				Root = hs.DeviceExistsAddress(addressBase, false),
-				ConnectedToTesla = hs.DeviceExistsAddress($"{addressBase}:Connected", false),
-				ChargePercent = hs.DeviceExistsAddress($"{addressBase}:Charge", false),
-				GridStatus = hs.DeviceExistsAddress($"{addressBase}:GridStatus", false),
-				SitePower = hs.DeviceExistsAddress($"{addressBase}:SitePower", false),
-				BatteryPower = hs.DeviceExistsAddress($"{addressBase}:BatteryPower", false),
-				SolarPower = hs.DeviceExistsAddress($"{addressBase}:SolarPower", false),
-				GridPower = hs.DeviceExistsAddress($"{addressBase}:GridPower", false)
-			};
+			string addressBase = $"TGW:{_gatewayIp}";
 
-			DeviceClass rootDevice;
+			int? root = HomeSeerSystem.GetDeviceByAddress(addressBase)?.Ref;
+			int? systemStatus = HomeSeerSystem.GetDeviceByAddress($"{addressBase}:SystemStatus")?.Ref;
+			int? connectedToTesla = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:Connected")?.Ref;
+			int? chargePercent = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:Charge")?.Ref;
+			int? gridStatus = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:GridStatus")?.Ref;
+			int? sitePower = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:SitePower")?.Ref;
+			int? batteryPower = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:BatteryPower")?.Ref;
+			int? solarPower = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:SolarPower")?.Ref;
+			int? gridPower = HomeSeerSystem.GetFeatureByAddress($"{addressBase}:GridPower")?.Ref;
+			
+			GatewayDeviceRefSet devRefSet = new GatewayDeviceRefSet();
 
-			if (refSet.Root == -1) {
-				int hsRef = hs.NewDeviceRef(siteName);
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, null, null);
-				
-				VSVGPairs.VSPair stoppedStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Status = "Stopped",
-					Value = 0
-				};
+			if (root == null) {
+				DeviceFactory factory = DeviceFactory.CreateDevice(Id)
+					.WithLocation("Powerwall")
+					.WithLocation2("Tesla")
+					.WithName(siteName)
+					.WithMiscFlags(EMiscFlag.StatusOnly);
 
-				VSVGPairs.VSPair runningStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Status = "Running",
-					Value = 1
-				};
+				HsDevice device = HomeSeerSystem.GetDeviceByRef(HomeSeerSystem.CreateDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(device.Ref, EProperty.Address, addressBase);
+				HomeSeerSystem.AddRefToCategory("Energy", device.Ref);
 
-				hs.DeviceVSP_AddPair(hsRef, stoppedStatus);
-				hs.DeviceVSP_AddPair(hsRef, runningStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 0,
-					Graphic = "/images/HomeSeer/status/off.gif"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 1,
-					Graphic = "/images/HomeSeer/status/on.gif"
-				});
-				
-				refSet.Root = hsRef;
-				rootDevice = device;
-				
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for gateway {addressBase} ({siteName})");
+				devRefSet.Root = device.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {device.Ref} for gateway {addressBase} ({siteName})");
 			} else {
-				rootDevice = (DeviceClass) hs.GetDeviceByRef(refSet.Root);
-				Program.WriteLog(LogType.Info, $"Found root device {refSet.Root} for gateway {addressBase} ({siteName})");
+				devRefSet.Root = (int) root;
+				Program.WriteLog(LogType.Info, $"Found root device {devRefSet.Root} for gateway {addressBase} ({siteName})");
 			}
 
-			if (refSet.ConnectedToTesla == -1) {
-				int hsRef = hs.NewDeviceRef("Tesla Connection");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "Connected", rootDevice);
+			if (systemStatus == null) {
+				// This should only happen when transitioning from the HS3 to HS4 plugin
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("System Status")
+					.AddGraphicForValue("/images/HomeSeer/status/off.gif", 0, "Stopped")
+					.AddGraphicForValue("/images/HomeSeer/status/on.gif", 1, "Running");
+				
+				InitializeFeatureFactory(factory);
 
-				VSVGPairs.VSPair disconnectedStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Status = "Disconnected",
-					Value = 0
-				};
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SystemStatus");
 
-				VSVGPairs.VSPair connectedStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Status = "Connected",
-					Value = 1
-				};
+				devRefSet.SystemStatus = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created feature {feature.Ref} for SystemStatus");
+				
+				// Let's also remove status pairs from the root device
+				HomeSeerSystem.ClearStatusControlsByRef(devRefSet.Root);
+			} else {
+				devRefSet.SystemStatus = (int) systemStatus;
+			}
 
-				hs.DeviceVSP_AddPair(hsRef, disconnectedStatus);
-				hs.DeviceVSP_AddPair(hsRef, connectedStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 0,
-					Graphic = "/images/HomeSeer/status/alarm.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 1,
-					Graphic = "/images/HomeSeer/status/ok.png"
-				});
+			if (connectedToTesla == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Tesla Connection")
+					.AddGraphicForValue("/images/HomeSeer/status/alarm.png", 0, "Disconnected")
+					.AddGraphicForValue("/images/HomeSeer/status/ok.png", 1, "Connected");
 
-				refSet.ConnectedToTesla = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for ConnectedToTesla");
+				InitializeFeatureFactory(factory);
+
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:Connected");
+
+				devRefSet.ConnectedToTesla = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created feature {feature.Ref} for ConnectedToTesla");
+			} else {
+				devRefSet.ConnectedToTesla = (int) connectedToTesla;
+			}
+
+			if (gridStatus == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Grid Status")
+					.AddGraphicForValue("/images/HomeSeer/status/alarm.png", 0, "Down")
+					.AddGraphicForValue("/images/HomeSeer/status/ok.png", 1, "Up");
+
+				InitializeFeatureFactory(factory);
+				
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:GridStatus");
+
+				devRefSet.GridStatus = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for GridStatus");
+			} else {
+				devRefSet.GridStatus = (int) gridStatus;
 			}
 			
-			if (refSet.GridStatus == -1) {
-				int hsRef = hs.NewDeviceRef("Grid Status");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "GridStatus", rootDevice);
+			if (chargePercent == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Powerwall Charge")
+					.AddGraphicForRange("/images/HomeSeer/status/battery_0.png", 0, 3)
+					.AddGraphicForRange("/images/HomeSeer/status/battery_25.png", 4, 36)
+					.AddGraphicForRange("/images/HomeSeer/status/battery_50.png", 37, 64)
+					.AddGraphicForRange("/images/HomeSeer/status/battery_75.png", 65, 89)
+					.AddGraphicForRange("/images/HomeSeer/status/battery_100.png", 90, 100);
 
-				VSVGPairs.VSPair downStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Value = 0,
-					Status = "Down"
-				};
+				InitializeFeatureFactory(factory);
 				
-				VSVGPairs.VSPair upStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Value = 1,
-					Status = "Up"
-				};
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:Charge");
 
-				hs.DeviceVSP_AddPair(hsRef, downStatus);
-				hs.DeviceVSP_AddPair(hsRef, upStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 0,
-					Graphic = "/images/HomeSeer/status/alarm.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.SingleValue,
-					Set_Value = 1,
-					Graphic = "/images/HomeSeer/status/ok.png"
-				});
+				devRefSet.ChargePercent = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for ChargePercent");
+			} else {
+				devRefSet.ChargePercent = (int) chargePercent;
+			}
 
-				refSet.GridStatus = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for GridStatus");
+			if (sitePower == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Total Site Power")
+					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
+					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
+					.AddGraphicForRange("/images/HomeSeer/status/electricity.gif", 50, 1000000);
+
+				InitializeFeatureFactory(factory);
+				
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SitePower");
+				
+				devRefSet.SitePower = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for SitePower");
+			} else {
+				devRefSet.SitePower = (int) sitePower;
 			}
 			
-			if (refSet.ChargePercent == -1) {
-				int hsRef = hs.NewDeviceRef("Powerwall Charge");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "Charge", rootDevice);
+			if (batteryPower == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Powerwall Power")
+					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
+					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
+					.AddGraphicForRange("/images/HomeSeer/status/electricity.gif", 50, 1000000);
 
-				VSVGPairs.VSPair chargeStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStatusSuffix = "%",
-					RangeStatusDecimals = 1,
-					RangeStart = 0,
-					RangeEnd = 100
-				};
-
-				hs.DeviceVSP_AddPair(hsRef, chargeStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 0,
-					RangeEnd = 3,
-					Graphic = "/images/HomeSeer/status/battery_0.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 4,
-					RangeEnd = 36,
-					Graphic = "/images/HomeSeer/status/battery_25.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 37,
-					RangeEnd = 64,
-					Graphic = "/images/HomeSeer/status/battery_50.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 65,
-					RangeEnd = 89,
-					Graphic = "/images/HomeSeer/status/battery_75.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 90,
-					RangeEnd = 100,
-					Graphic = "/images/HomeSeer/status/battery_100.png"
-				});
-
-				refSet.ChargePercent = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for ChargePercent");
-			}
-
-			if (refSet.SitePower == -1) {
-				int hsRef = hs.NewDeviceRef("Total Site Power");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "SitePower", rootDevice);
-
-				VSVGPairs.VSPair powerStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = 1000000,
-					RangeStatusSuffix = " W",
-				};
-
-				hs.DeviceVSP_AddPair(hsRef, powerStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = -50,
-					Graphic = "/images/HomeSeer/status/replay.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -49,
-					RangeEnd = 49,
-					Graphic = "/images/HomeSeer/status/off.gif"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 50,
-					RangeEnd = 1000000,
-					Graphic = "/images/HomeSeer/status/electricity.gif"
-				});
+				InitializeFeatureFactory(factory);
 				
-				refSet.SitePower = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for SitePower");
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:BatteryPower");
+
+				devRefSet.BatteryPower = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for BatteryPower");
+			} else {
+				devRefSet.BatteryPower = (int) batteryPower;
 			}
 			
-			if (refSet.BatteryPower == -1) {
-				int hsRef = hs.NewDeviceRef("Powerwall Power");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "BatteryPower", rootDevice);
+			if (solarPower == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Solar Power")
+					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
+					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
+					.AddGraphicForRange("/images/HomeSeer/status/electricity.gif", 50, 1000000);
 
-				VSVGPairs.VSPair powerStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = 1000000,
-					RangeStatusSuffix = " W",
-				};
-
-				hs.DeviceVSP_AddPair(hsRef, powerStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = -50,
-					Graphic = "/images/HomeSeer/status/replay.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -49,
-					RangeEnd = 49,
-					Graphic = "/images/HomeSeer/status/off.gif"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 50,
-					RangeEnd = 1000000,
-					Graphic = "/images/HomeSeer/status/electricity.gif"
-				});
+				InitializeFeatureFactory(factory);
 				
-				refSet.BatteryPower = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for BatteryPower");
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SolarPower");
+
+				devRefSet.SolarPower = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for SolarPower");
+			} else {
+				devRefSet.SolarPower = (int) solarPower;
 			}
 			
-			if (refSet.SolarPower == -1) {
-				int hsRef = hs.NewDeviceRef("Solar Power");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "SolarPower", rootDevice);
+			if (gridPower == null) {
+				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+					.WithName("Grid Power")
+					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
+					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
+					.AddGraphicForRange("/images/HomeSeer/status/electricity.gif", 50, 1000000);
 
-				VSVGPairs.VSPair powerStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = 1000000,
-					RangeStatusSuffix = " W",
-				};
-
-				hs.DeviceVSP_AddPair(hsRef, powerStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = -50,
-					Graphic = "/images/HomeSeer/status/replay.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -49,
-					RangeEnd = 49,
-					Graphic = "/images/HomeSeer/status/off.gif"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 50,
-					RangeEnd = 1000000,
-					Graphic = "/images/HomeSeer/status/electricity.gif"
-				});
+				InitializeFeatureFactory(factory);
 				
-				refSet.SolarPower = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for SolarPower");
-			}
-			
-			if (refSet.GridPower == -1) {
-				int hsRef = hs.NewDeviceRef("Grid Power");
-				DeviceClass device = (DeviceClass) hs.GetDeviceByRef(hsRef);
-				InitializeDevice(device, addressBase, "GridPower", rootDevice);
+				HsFeature feature = HomeSeerSystem.GetFeatureByRef(HomeSeerSystem.CreateFeatureForDevice(factory.PrepareForHs()));
+				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:GridPower");
 
-				VSVGPairs.VSPair powerStatus = new VSVGPairs.VSPair(ePairStatusControl.Status)
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = 1000000,
-					RangeStatusSuffix = " W",
-				};
-
-				hs.DeviceVSP_AddPair(hsRef, powerStatus);
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -1000000,
-					RangeEnd = -50,
-					Graphic = "/images/HomeSeer/status/replay.png"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = -49,
-					RangeEnd = 49,
-					Graphic = "/images/HomeSeer/status/off.gif"
-				});
-				hs.DeviceVGP_AddPair(hsRef, new VSVGPairs.VGPair
-				{
-					PairType = VSVGPairs.VSVGPairType.Range,
-					RangeStart = 50,
-					RangeEnd = 1000000,
-					Graphic = "/images/HomeSeer/status/electricity.gif"
-				});
-				
-				refSet.GridPower = hsRef;
-				Program.WriteLog(LogType.Info, $"Created device {hsRef} for GridPower");
+				devRefSet.GridPower = feature.Ref;
+				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for GridPower");
+			} else {
+				devRefSet.GridPower = (int) gridPower;
 			}
 
-			this._devRefSet = refSet;
+			_devRefSet = devRefSet;
 		}
 
-		private void InitializeDevice(DeviceClass device, string addressBase, string addressSuffix, DeviceClass rootDevice) {
-			string address = addressBase;
-			if (addressSuffix != null) {
-				address = $"{addressBase}:{addressSuffix}";
-			}
-
-			device.set_Address(hs, address);
-			device.set_Interface(hs, Name);
-			device.set_InterfaceInstance(hs, InstanceFriendlyName());
-			device.set_Device_Type_String(hs, $"Tesla Powerwall");
-			if (addressSuffix == null) {
-				device.set_DeviceType_Set(hs, new DeviceTypeInfo_m.DeviceTypeInfo
-				{
-					Device_Type = DeviceTypeInfo_m.DeviceTypeInfo.eDeviceType_GenericRoot
-				});
-				
-				device.set_Relationship(hs, Enums.eRelationship.Parent_Root);
-			} else {
-				device.set_DeviceType_Set(hs, new DeviceTypeInfo_m.DeviceTypeInfo
-				{
-					Device_API = DeviceTypeInfo_m.DeviceTypeInfo.eDeviceAPI.Plug_In
-				});
-				
-				device.set_Relationship(hs, Enums.eRelationship.Child);
-				rootDevice.AssociatedDevice_Add(hs, device.get_Ref(hs));
-				device.AssociatedDevice_Add(hs, rootDevice.get_Ref(hs));
-			}
+		private void InitializeFeatureFactory(FeatureFactory factory) {
+			factory.WithMiscFlags(EMiscFlag.StatusOnly)
+				.WithLocation("Powerwall")
+				.WithLocation2("Tesla");
 		}
 
 		private async void UpdateDeviceData() {
@@ -559,9 +307,9 @@ namespace HSPI_TeslaPowerwall
 
 			try
 			{
-				siteMaster = await this._client.GetSiteMaster();
-				aggregates = await this._client.GetAggregates();
-				gridStatus = await this._client.GetGridStatus();
+				siteMaster = await _client.GetSiteMaster();
+				aggregates = await _client.GetAggregates();
+				gridStatus = await _client.GetGridStatus();
 			} catch (Exception ex) {
 				Program.WriteLog(LogType.Error, $"Unable to retrieve Powerwall data: {ex.Message}");
 				return;
@@ -569,21 +317,23 @@ namespace HSPI_TeslaPowerwall
 
 			Program.WriteLog(LogType.Verbose, "Powerwall data retrieved successfully");
 
-			hs.SetDeviceValueByRef(this._devRefSet.Root, siteMaster.Running ? 1 : 0, true);
-			hs.SetDeviceValueByRef(this._devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0, true);
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
 
-			hs.SetDeviceValueByRef(this._devRefSet.ChargePercent, await this._client.GetSystemChargePercentage(), true);
+			double chargePct = Math.Round(await _client.GetSystemChargePercentage(), 1);
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ChargePercent, chargePct);
+			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.ChargePercent, chargePct + "%");
 
-			hs.SetDeviceValueByRef(this._devRefSet.GridStatus, gridStatus.Status == "SystemGridConnected" ? 1 : 0, true);
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.GridStatus, gridStatus.Status == "SystemGridConnected" ? 1 : 0);
 
-			hs.SetDeviceValueByRef(this._devRefSet.SitePower, aggregates.Load.InstantPower, true);
-			hs.SetDeviceString(this._devRefSet.SitePower, GetPowerString(aggregates.Load.InstantPower), false);
-			hs.SetDeviceValueByRef(this._devRefSet.BatteryPower, aggregates.Battery.InstantPower, true);
-			hs.SetDeviceString(this._devRefSet.BatteryPower, GetPowerString(aggregates.Battery.InstantPower), false);
-			hs.SetDeviceValueByRef(this._devRefSet.SolarPower, aggregates.Solar.InstantPower, true);
-			hs.SetDeviceString(this._devRefSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower), false);
-			hs.SetDeviceValueByRef(this._devRefSet.GridPower, aggregates.Site.InstantPower, true);
-			hs.SetDeviceString(this._devRefSet.GridPower, GetPowerString(aggregates.Site.InstantPower), false);
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SitePower, Math.Round(aggregates.Load.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.SitePower, GetPowerString(aggregates.Load.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.BatteryPower, Math.Round(aggregates.Battery.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.BatteryPower, GetPowerString(aggregates.Battery.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SolarPower, Math.Round(aggregates.Solar.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.GridPower, Math.Round(aggregates.Site.InstantPower));
+			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
 		}
 
 		private string GetPowerString(double watts) {
@@ -594,6 +344,7 @@ namespace HSPI_TeslaPowerwall
 	public struct GatewayDeviceRefSet
 	{
 		public int Root;
+		public int SystemStatus;
 		public int ConnectedToTesla;
 		public int ChargePercent;
 		public int GridStatus;
