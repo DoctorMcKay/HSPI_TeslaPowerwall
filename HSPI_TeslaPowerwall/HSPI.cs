@@ -13,7 +13,8 @@ namespace HSPI_TeslaPowerwall
 	public class HSPI : AbstractPlugin
 	{
 		public override string Name { get; } = "Tesla Powerwall";
-		public override string Id { get; } = "Tesla Powerwall";
+		public override string Id { get; } = "TeslaPowerwall";
+		protected override string SettingsFileName { get; } = "Tesla Powerwall.ini";
 
 		private readonly Regex _ipRegex = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
 		private PowerwallClient _client;
@@ -139,7 +140,7 @@ namespace HSPI_TeslaPowerwall
 			GatewayDeviceRefSet devRefSet = new GatewayDeviceRefSet();
 
 			if (root == null) {
-				DeviceFactory factory = DeviceFactory.CreateDevice(Id)
+				DeviceFactory factory = DeviceFactory.CreateDevice(Name)
 					.WithLocation("Powerwall")
 					.WithLocation2("Tesla")
 					.WithName(siteName)
@@ -158,7 +159,7 @@ namespace HSPI_TeslaPowerwall
 
 			if (systemStatus == null) {
 				// This should only happen when transitioning from the HS3 to HS4 plugin
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("System Status")
 					.AddGraphicForValue("/images/HomeSeer/status/off.gif", 0, "Stopped")
 					.AddGraphicForValue("/images/HomeSeer/status/on.gif", 1, "Running");
@@ -178,7 +179,7 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			if (connectedToTesla == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Tesla Connection")
 					.AddGraphicForValue("/images/HomeSeer/status/alarm.png", 0, "Disconnected")
 					.AddGraphicForValue("/images/HomeSeer/status/ok.png", 1, "Connected");
@@ -195,7 +196,7 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			if (gridStatus == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Grid Status")
 					.AddGraphicForValue("/images/HomeSeer/status/alarm.png", 0, "Down")
 					.AddGraphicForValue("/images/HomeSeer/status/ok.png", 1, "Up");
@@ -212,7 +213,7 @@ namespace HSPI_TeslaPowerwall
 			}
 			
 			if (chargePercent == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Powerwall Charge")
 					.AddGraphicForRange("/images/HomeSeer/status/battery_0.png", 0, 3)
 					.AddGraphicForRange("/images/HomeSeer/status/battery_25.png", 4, 36)
@@ -232,7 +233,7 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			if (sitePower == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Total Site Power")
 					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
 					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
@@ -250,7 +251,7 @@ namespace HSPI_TeslaPowerwall
 			}
 			
 			if (batteryPower == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Powerwall Power")
 					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
 					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
@@ -268,7 +269,7 @@ namespace HSPI_TeslaPowerwall
 			}
 			
 			if (solarPower == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Solar Power")
 					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
 					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
@@ -286,7 +287,7 @@ namespace HSPI_TeslaPowerwall
 			}
 			
 			if (gridPower == null) {
-				FeatureFactory factory = FeatureFactory.CreateFeature(Id, devRefSet.Root)
+				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("Grid Power")
 					.AddGraphicForRange("/images/HomeSeer/status/replay.png", -1000000, -50)
 					.AddGraphicForRange("/images/HomeSeer/status/off.gif", -49, 49)
