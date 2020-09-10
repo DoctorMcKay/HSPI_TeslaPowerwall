@@ -81,10 +81,10 @@ namespace HSPI_TeslaPowerwall
         }
 
         private async Task<dynamic> GetApiContent(string endpoint) {
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{this._ipAddress}/api{endpoint}");
-            HttpResponseMessage res = await this._httpClient.SendAsync(req);
+            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}/api{endpoint}");
+            HttpResponseMessage res = await _httpClient.SendAsync(req);
             string responseText = await res.Content.ReadAsStringAsync();
-            dynamic content = this._jsonSerializer.DeserializeObject(responseText);
+            dynamic content = _jsonSerializer.DeserializeObject(responseText);
             
             req.Dispose();
             res.Dispose();

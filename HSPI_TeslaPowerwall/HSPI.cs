@@ -1,27 +1,29 @@
 ﻿using System;
+using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Timers;
 using HomeSeer.Jui.Views;
 using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices;
+using HomeSeer.PluginSdk.Logging;
 
 namespace HSPI_TeslaPowerwall
 {
 	// ReSharper disable once InconsistentNaming
 	public class HSPI : AbstractPlugin
 	{
-		public const string PLUGIN_NAME = "Tesla Powerwall";
-		public override string Name { get; } = PLUGIN_NAME;
-		public override string Id { get; } = PLUGIN_NAME;
+		public override string Name { get; } = "Tesla Powerwall";
+		public override string Id { get; } = "Tesla Powerwall";
 
 		private readonly Regex _ipRegex = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
 		private GatewayDeviceRefSet _devRefSet;
 		private Timer _pollTimer;
+		private bool _debugLogging = false;
 
 		protected override void Initialize() {
-			Program.WriteLog(LogType.Verbose, "Initialize");
+			WriteLog(ELogType.Trace, "Initialize");
 			
 			// Build the settings page
 			PageFactory settingsPageFactory = PageFactory
@@ -31,11 +33,18 @@ namespace HSPI_TeslaPowerwall
 					"<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">Support and Documentation</a>",
 					"Enter the LAN IP address of your Tesla Backup Gateway."
 				)
-				.WithInput("gateway_ip", "Gateway IP");
+				.WithInput("gateway_ip", "Gateway IP")
+#if DEBUG
+				.WithLabel("debug_log", "Enable Debug Logging", "ON - DEBUG BUILD");
+#else
+				.WithToggle("debug_log", "Enable Debug Logging");
+#endif
 			
 			Settings.Add(settingsPageFactory.Page);
 
 			Status = PluginStatus.Ok();
+
+			_debugLogging = HomeSeerSystem.GetINISetting("Debug", "debug_log", "0", SettingsFileName) == "1";
 			
 			CheckGatewayConnection();
 		}
@@ -45,32 +54,37 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		protected override bool OnSettingChange(string pageId, AbstractView currentView, AbstractView changedView) {
-			Program.WriteLog(LogType.Verbose, $"Request to save setting {currentView.Id} on page {pageId}");
+			WriteLog(ELogType.Debug, $"Request to save setting {currentView.Id} on page {pageId}");
 
 			if (pageId != "TeslaPowerwallSettings") {
-				Program.WriteLog(LogType.Warn, $"Request to save settings on unknown page {pageId}!");
+				WriteLog(ELogType.Warning, $"Request to save settings on unknown page {pageId}!");
 				return true;
 			}
 
-			if (currentView.Id == "gateway_ip") {
-				// We want to update the gateway IP. Firstly, did it change?
-				string newValue = changedView.GetStringValue();
-				if (newValue == currentView.GetStringValue()) {
-					return true; // no change
-				}
+			switch (currentView.Id) {
+				case "gateway_ip":
+					// We want to update the gateway IP. Firstly, did it change?
+					string newValue = changedView.GetStringValue();
+					if (newValue == currentView.GetStringValue()) {
+						return true; // no change
+					}
 				
-				// Make sure it's a valid IP format
-				if (newValue == "" || _ipRegex.Matches(newValue).Count > 0) {
-					HomeSeerSystem.SaveINISetting("GatewayNetwork", "ip", newValue, SettingsFileName);
-					CheckGatewayConnection();
-					return true;
-				}
+					// Make sure it's a valid IP format
+					if (newValue == "" || _ipRegex.Matches(newValue).Count > 0) {
+						HomeSeerSystem.SaveINISetting("GatewayNetwork", "ip", newValue, SettingsFileName);
+						CheckGatewayConnection();
+						return true;
+					}
 
-				throw new Exception("Invalid IP address format.");
+					throw new Exception("Invalid IP address format.");
+				
+				case "debug_log":
+					_debugLogging = changedView.GetStringValue() == "True";
+					return true;
 			}
 			
-			Program.WriteLog(LogType.Verbose, $"Request to save unknown setting {currentView.Id}");
-			return true;
+			WriteLog(ELogType.Info, $"Request to save unknown setting {currentView.Id}");
+			return false;
 		}
 
 		protected override void BeforeReturnStatus() {
@@ -82,8 +96,8 @@ namespace HSPI_TeslaPowerwall
 			
 			_gatewayIp = HomeSeerSystem.GetINISetting("GatewayNetwork", "ip", "", SettingsFileName);
 
-			Program.WriteLog(LogType.Info, $"Attempting to connect to Gateway at IP \"{this._gatewayIp}\"");
-			
+			WriteLog(ELogType.Info, $"Attempting to connect to Gateway at IP \"{_gatewayIp}\"");
+
 			if (_ipRegex.Matches(_gatewayIp).Count == 0) {
 				Status = PluginStatus.Fatal("No Tesla Gateway IP address configured");
 				return;
@@ -95,13 +109,13 @@ namespace HSPI_TeslaPowerwall
 				SiteInfo info = await _client.GetSiteInfo();
 				// It worked!
 				Status = PluginStatus.Ok();
-				Program.WriteLog(LogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at IP {this._gatewayIp}");
+				WriteLog(ELogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at IP {this._gatewayIp}");
 				FindDevices(info.Name);
 
 				_pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
 				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { UpdateDeviceData(); };
 			} catch (Exception ex) {
-				Program.WriteLog(LogType.Error, $"Cannot get site master from Gateway {this._gatewayIp}: {ex.Message}");
+				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {this._gatewayIp}: {ex.Message}");
 				Status = PluginStatus.Fatal("Cannot contact Gateway");
 
 				_pollTimer = new Timer(60000) {Enabled = true};
@@ -136,10 +150,10 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.AddRefToCategory("Energy", device.Ref);
 
 				devRefSet.Root = device.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {device.Ref} for gateway {addressBase} ({siteName})");
+				WriteLog(ELogType.Info, $"Created device {device.Ref} for gateway {addressBase} ({siteName})");
 			} else {
 				devRefSet.Root = (int) root;
-				Program.WriteLog(LogType.Info, $"Found root device {devRefSet.Root} for gateway {addressBase} ({siteName})");
+				WriteLog(ELogType.Info, $"Found root device {devRefSet.Root} for gateway {addressBase} ({siteName})");
 			}
 
 			if (systemStatus == null) {
@@ -155,7 +169,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SystemStatus");
 
 				devRefSet.SystemStatus = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created feature {feature.Ref} for SystemStatus");
+				WriteLog(ELogType.Info, $"Created feature {feature.Ref} for SystemStatus");
 				
 				// Let's also remove status pairs from the root device
 				HomeSeerSystem.ClearStatusControlsByRef(devRefSet.Root);
@@ -175,7 +189,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:Connected");
 
 				devRefSet.ConnectedToTesla = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created feature {feature.Ref} for ConnectedToTesla");
+				WriteLog(ELogType.Info, $"Created feature {feature.Ref} for ConnectedToTesla");
 			} else {
 				devRefSet.ConnectedToTesla = (int) connectedToTesla;
 			}
@@ -192,7 +206,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:GridStatus");
 
 				devRefSet.GridStatus = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for GridStatus");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for GridStatus");
 			} else {
 				devRefSet.GridStatus = (int) gridStatus;
 			}
@@ -212,7 +226,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:Charge");
 
 				devRefSet.ChargePercent = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for ChargePercent");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for ChargePercent");
 			} else {
 				devRefSet.ChargePercent = (int) chargePercent;
 			}
@@ -230,7 +244,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SitePower");
 				
 				devRefSet.SitePower = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for SitePower");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for SitePower");
 			} else {
 				devRefSet.SitePower = (int) sitePower;
 			}
@@ -248,7 +262,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:BatteryPower");
 
 				devRefSet.BatteryPower = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for BatteryPower");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for BatteryPower");
 			} else {
 				devRefSet.BatteryPower = (int) batteryPower;
 			}
@@ -266,7 +280,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:SolarPower");
 
 				devRefSet.SolarPower = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for SolarPower");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for SolarPower");
 			} else {
 				devRefSet.SolarPower = (int) solarPower;
 			}
@@ -284,7 +298,7 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdatePropertyByRef(feature.Ref, EProperty.Address, $"{addressBase}:GridPower");
 
 				devRefSet.GridPower = feature.Ref;
-				Program.WriteLog(LogType.Info, $"Created device {feature.Ref} for GridPower");
+				WriteLog(ELogType.Info, $"Created device {feature.Ref} for GridPower");
 			} else {
 				devRefSet.GridPower = (int) gridPower;
 			}
@@ -299,7 +313,7 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		private async void UpdateDeviceData() {
-			Program.WriteLog(LogType.Verbose, "Retrieving Powerwall data");
+			WriteLog(ELogType.Debug, "Retrieving Powerwall data");
 
 			SiteMaster siteMaster;
 			Aggregates aggregates;
@@ -311,11 +325,11 @@ namespace HSPI_TeslaPowerwall
 				aggregates = await _client.GetAggregates();
 				gridStatus = await _client.GetGridStatus();
 			} catch (Exception ex) {
-				Program.WriteLog(LogType.Error, $"Unable to retrieve Powerwall data: {ex.Message}");
+				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall data: {ex.Message}");
 				return;
 			}
 
-			Program.WriteLog(LogType.Verbose, "Powerwall data retrieved successfully");
+			WriteLog(ELogType.Debug, "Powerwall data retrieved successfully");
 
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
@@ -338,6 +352,27 @@ namespace HSPI_TeslaPowerwall
 
 		private string GetPowerString(double watts) {
 			return $"{Math.Round(watts / 1000, 1)} kW";
+		}
+
+		public void WriteLog(ELogType logType, string message, [CallerLineNumber] int lineNumber = 0, [CallerMemberName] string caller = null) {
+#if DEBUG
+			bool isDebugMode = true;
+
+			// Prepend calling function and line number
+			message = $"[{caller}:{lineNumber}] {message}";
+			
+			// Also print to console in debug builds
+			string type = logType.ToString().ToLower();
+			Console.WriteLine($"[{type}] {message}");
+#else
+			bool isDebugMode = _debugLogging;
+#endif
+
+			if (logType <= ELogType.Debug && !isDebugMode) {
+				return;
+			}
+			
+			HomeSeerSystem.WriteLog(logType, message, Name);
 		}
 	}
 
