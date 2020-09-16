@@ -116,7 +116,13 @@ namespace HSPI_TeslaPowerwall
 				_pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
 				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { UpdateDeviceData(); };
 			} catch (Exception ex) {
-				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {this._gatewayIp}: {ex.Message}");
+				string errorMsg = ex.Message;
+				Exception innerEx = ex;
+				while (innerEx.InnerException != null) {
+					errorMsg += $" [{innerEx.Message}]";
+				}
+				
+				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}: {errorMsg}");
 				Status = PluginStatus.Fatal("Cannot contact Gateway");
 
 				_pollTimer = new Timer(60000) {Enabled = true};
