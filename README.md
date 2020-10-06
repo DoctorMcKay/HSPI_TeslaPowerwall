@@ -5,7 +5,7 @@ This plugin is written for HS3, and will run on HS3 and HS4 on Windows or Linux.
 
 # Installation
 
-This plugin is available in the HomeSeer plugin updater under the Energy Management category.
+This plugin is available in the HomeSeer plugin updater.
 
 # Configuration
 
