@@ -21,7 +21,7 @@ namespace HSPI_TeslaPowerwall
 		private string _gatewayIp = "";
 		private GatewayDeviceRefSet _devRefSet;
 		private Timer _pollTimer;
-		private bool _debugLogging = false;
+		private bool _debugLogging;
 
 		protected override void Initialize() {
 			WriteLog(ELogType.Trace, "Initialize");
@@ -125,7 +125,7 @@ namespace HSPI_TeslaPowerwall
 				FindDevices(info.Name);
 
 				_pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
-				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { UpdateDeviceData(); };
+				_pollTimer.Elapsed += (src, arg) => { UpdateDeviceData(); };
 			} catch (Exception ex) {
 				string errorMsg = ex.Message;
 				Exception innerEx = ex;
@@ -137,7 +137,7 @@ namespace HSPI_TeslaPowerwall
 				Status = PluginStatus.Fatal("Cannot contact Gateway");
 
 				_pollTimer = new Timer(60000) {Enabled = true};
-				_pollTimer.Elapsed += (Object source, ElapsedEventArgs e) => { CheckGatewayConnection(); };
+				_pollTimer.Elapsed += (src, arg) => { CheckGatewayConnection(); };
 			}
 		}
 

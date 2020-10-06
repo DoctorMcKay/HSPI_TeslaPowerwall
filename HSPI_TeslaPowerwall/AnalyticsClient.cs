@@ -9,15 +9,15 @@ using HomeSeer.PluginSdk.Logging;
 
 namespace HSPI_TeslaPowerwall {
 	public class AnalyticsClient {
-		private const string REPORT_URL = "https://hsstats.doctormckay.com/report.php";
-		private const string GLOBAL_INI_FILENAME = "DrMcKayGlobal.ini";
+		private const string ReportUrl = "https://hsstats.doctormckay.com/report.php";
+		private const string GlobalIniFilename = "DrMcKayGlobal.ini";
 
 		public string CustomSystemId {
 			get {
-				string customSystemId = _hs.GetINISetting("System", "ID", "", GLOBAL_INI_FILENAME);
+				string customSystemId = _hs.GetINISetting("System", "ID", "", GlobalIniFilename);
 				if (customSystemId.Length == 0) {
 					customSystemId = Guid.NewGuid().ToString();
-					_hs.SaveINISetting("System", "ID", customSystemId, GLOBAL_INI_FILENAME);
+					_hs.SaveINISetting("System", "ID", customSystemId, GlobalIniFilename);
 				}
 
 				return customSystemId;
@@ -34,7 +34,7 @@ namespace HSPI_TeslaPowerwall {
 
 		public void ReportIn(int milliseconds) {
 			Timer timer = new Timer(milliseconds) {Enabled = true, AutoReset = false};
-			timer.Elapsed += (object src, ElapsedEventArgs a) => {
+			timer.Elapsed += (src, arg) => {
 				Report();
 			};
 		}
@@ -43,7 +43,7 @@ namespace HSPI_TeslaPowerwall {
 			try {
 				JavaScriptSerializer json = new JavaScriptSerializer();
 				HttpClient client = new HttpClient();
-				HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, REPORT_URL) {
+				HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, ReportUrl) {
 					Content = new StringContent(json.Serialize(_gatherData()), Encoding.UTF8, "application/json")
 				};
 				HttpResponseMessage res = await client.SendAsync(req);
