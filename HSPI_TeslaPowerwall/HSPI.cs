@@ -26,31 +26,42 @@ namespace HSPI_TeslaPowerwall
 		protected override void Initialize() {
 			WriteLog(ELogType.Trace, "Initialize");
 			
+			AnalyticsClient analytics = new AnalyticsClient(this, HomeSeerSystem);
+			
 			// Build the settings page
 			PageFactory settingsPageFactory = PageFactory
 				.CreateSettingsPage("TeslaPowerwallSettings", "Tesla Powerwall Settings")
-				.WithLabel(
-					"gateway_ip_label",
-					"<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">Support and Documentation</a>",
-					"Enter the LAN IP address of your Tesla Backup Gateway."
-				)
-				.WithInput("gateway_ip", "Gateway IP")
+				.WithLabel("plugin_status", "Status (refresh to update)", "x")
+				.WithInput("gateway_ip", "Backup Gateway LAN IP")
+				.WithGroup("debug_group", "<hr>", new AbstractView[] {
+					new LabelView("debug_support_link", "Support and Documentation", "<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">HomeSeer Forum</a>"), 
+					new LabelView("debug_system_id", "System ID (include this with any support requests)", analytics.CustomSystemId),
 #if DEBUG
-				.WithLabel("debug_log", "Enable Debug Logging", "ON - DEBUG BUILD");
+					new LabelView("debug_log", "Enable Debug Logging", "ON - DEBUG BUILD")
 #else
-				.WithToggle("debug_log", "Enable Debug Logging");
+					new ToggleView("debug_log", "Enable Debug Logging")
 #endif
+				});
 			
 			Settings.Add(settingsPageFactory.Page);
 
-			Status = PluginStatus.Ok();
+			Status = PluginStatus.Info("Initializing...");
 
 			_debugLogging = HomeSeerSystem.GetINISetting("Debug", "debug_log", "0", SettingsFileName) == "1";
 			
 			CheckGatewayConnection();
+			
+			analytics.ReportIn(5000);
 		}
 
 		protected override void OnSettingsLoad() {
+			// Called when the settings page is loaded. Use to pre-fill the inputs.
+			string statusText = Status.Status.ToString().ToUpper();
+			if (Status.StatusText.Length > 0) {
+				statusText += ": " + Status.StatusText;
+			}
+			
+			((LabelView) Settings.Pages[0].GetViewById("plugin_status")).Value = statusText;
 			Settings.Pages[0].GetViewById("gateway_ip").UpdateValue(_gatewayIp);
 		}
 
@@ -320,7 +331,7 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		private async void UpdateDeviceData() {
-			WriteLog(ELogType.Debug, "Retrieving Powerwall data");
+			WriteLog(ELogType.Trace, "Retrieving Powerwall data");
 
 			SiteMaster siteMaster;
 			Aggregates aggregates;
@@ -336,7 +347,7 @@ namespace HSPI_TeslaPowerwall
 				return;
 			}
 
-			WriteLog(ELogType.Debug, "Powerwall data retrieved successfully");
+			WriteLog(ELogType.Trace, "Powerwall data retrieved successfully");
 
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
