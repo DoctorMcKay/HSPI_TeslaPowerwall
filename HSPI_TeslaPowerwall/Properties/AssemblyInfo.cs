@@ -5,7 +5,11 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("HSPI_TeslaPowerwall")]
+#if DEBUG
+[assembly: AssemblyDescription("DEBUG BUILD")]
+#else
 [assembly: AssemblyDescription("")]
+#endif
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("HSPI_TeslaPowerwall")]

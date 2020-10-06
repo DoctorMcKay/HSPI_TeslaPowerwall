@@ -28,13 +28,23 @@ jobs:
       run: |
         mkdir artifacts
         cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
-        mkdir "artifacts\Debug Build"
-        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts\Debug Build\HSPI_TeslaPowerwall.exe"
+        cp HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
+        cp install.txt artifacts\install.txt
+    
+    - name: Stage debug artifacts
+      run: |
+        mkdir artifacts-debug
+        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts-debug\HSPI_TeslaPowerwall.exe"
+        cp HSPI_TeslaPowerwall.exe.config artifacts-debug\HSPI_TeslaPowerwall.exe.config
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v1
       with:
         name: Plugin
         path: artifacts
-
-
+    
+    - name: Upload debug artifacts
+      uses: actions/upload-artifact@v1
+      with:
+        name: Debug Build
+        path: artifacts-debug
