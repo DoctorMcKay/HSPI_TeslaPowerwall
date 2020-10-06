@@ -102,3 +102,14 @@ Additionally, please note that solar power **may be negative**. Under normal cir
 negative solar power due to rounding, but during the nighttime, your inverter will draw current from the grid to stay
 awake, which will register a few watts in the negative direction. Therefore, if you want an event to trigger when solar
 is not producing, you should check whether solar power is less than 1 W rather than checking if it's 0.
+
+# Removing Your Gateway Device
+
+Should you ever need to delete your Backup Gateway from HS4, which you may need to do if your Gateway's IP changes, as
+this will create a new set of devices in HS4, first disable the plugin and then manually delete the device and all its
+features.
+
+At the top-right of the Devices page is a button which looks like a checklist. Click this button to enable bulk device
+editing. Then select the checkbox next to the Gateway device, which should also automatically select all of its features.
+If the features are not automatically selected, manually select each one. Then scroll back to the top of the page and
+select Bulk Action > Delete.
