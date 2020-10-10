@@ -17,8 +17,7 @@ namespace HSPI_TeslaPowerwall
             _jsonSerializer = new JavaScriptSerializer();
 
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
-            handler.ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
 
         public async Task<SiteInfo> GetSiteInfo()  {

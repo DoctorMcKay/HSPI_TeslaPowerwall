@@ -104,6 +104,7 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		private async void CheckGatewayConnection() {
+			Status = PluginStatus.Info("Connecting to Gateway...");
 			_pollTimer?.Stop();
 			
 			_gatewayIp = HomeSeerSystem.GetINISetting("GatewayNetwork", "ip", "", SettingsFileName);
@@ -114,10 +115,9 @@ namespace HSPI_TeslaPowerwall
 				Status = PluginStatus.Fatal("No Tesla Gateway IP address configured");
 				return;
 			}
-			
-			_client = new PowerwallClient(_gatewayIp);
 
 			try {
+				_client = new PowerwallClient(_gatewayIp);
 				SiteInfo info = await _client.GetSiteInfo();
 				// It worked!
 				Status = PluginStatus.Ok();
@@ -134,8 +134,8 @@ namespace HSPI_TeslaPowerwall
 				}
 				
 				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}: {errorMsg}");
-				Status = PluginStatus.Fatal("Cannot contact Gateway");
-
+				Status = PluginStatus.Fatal("Cannot contact Gateway: " + errorMsg);
+				
 				_pollTimer = new Timer(60000) {Enabled = true};
 				_pollTimer.Elapsed += (src, arg) => { CheckGatewayConnection(); };
 			}
