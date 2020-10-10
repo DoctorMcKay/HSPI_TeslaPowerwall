@@ -117,7 +117,7 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			try {
-				_client = new PowerwallClient(_gatewayIp);
+				_client = new PowerwallClient(_gatewayIp, this);
 				SiteInfo info = await _client.GetSiteInfo();
 				// It worked!
 				Status = PluginStatus.Ok();

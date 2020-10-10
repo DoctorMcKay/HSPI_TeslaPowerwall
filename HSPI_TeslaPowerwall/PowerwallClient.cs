@@ -1,26 +1,32 @@
-﻿using System.Net.Http;
+﻿using System;
+using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using HomeSeer.PluginSdk.Logging;
 
 namespace HSPI_TeslaPowerwall
 {
-    public class PowerwallClient
-    {
+    public class PowerwallClient {
+        private const int RequestTimeoutMs = 10000;
+        
         private readonly string _ipAddress;
         private readonly HttpClient _httpClient;
         private readonly JavaScriptSerializer _jsonSerializer;
+        private readonly HSPI _hs;
 
-        public PowerwallClient(string ipAddress) {
+        public PowerwallClient(string ipAddress, HSPI hs) {
             _ipAddress = ipAddress;
             HttpClientHandler handler = new HttpClientHandler();
             _httpClient = new HttpClient(handler);
             _jsonSerializer = new JavaScriptSerializer();
+            _hs = hs;
 
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
         }
 
-        public async Task<SiteInfo> GetSiteInfo()  {
+        public async Task<SiteInfo> GetSiteInfo() {
             dynamic content = await GetApiContent("/site_info/site_name");
             return new SiteInfo
             {
@@ -80,10 +86,26 @@ namespace HSPI_TeslaPowerwall
         }
 
         private async Task<dynamic> GetApiContent(string endpoint) {
+            CancellationTokenSource cancelSrc = new CancellationTokenSource();
+            CancellationToken cancel = cancelSrc.Token;
+
+            Task timeout = Task.Delay(RequestTimeoutMs, cancel);
+
+            _hs.WriteLog(ELogType.Trace, $"Requesting https://{_ipAddress}/api{endpoint}");
             HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}/api{endpoint}");
-            HttpResponseMessage res = await _httpClient.SendAsync(req);
+            Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
+
+            Task finished = await Task.WhenAny(timeout, responseTask);
+            cancelSrc.Cancel();
+            if (finished == timeout) {
+                string[] parts = endpoint.Split('/');
+                throw new Exception($"{parts[parts.Length - 1]} request timed out");
+            }
+
+            HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result;
             string responseText = await res.Content.ReadAsStringAsync();
             dynamic content = _jsonSerializer.DeserializeObject(responseText);
+            _hs.WriteLog(ELogType.Trace, $"Request complete with status {res.StatusCode}");
             
             req.Dispose();
             res.Dispose();
