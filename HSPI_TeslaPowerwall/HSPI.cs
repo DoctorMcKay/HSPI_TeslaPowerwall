@@ -129,7 +129,7 @@ namespace HSPI_TeslaPowerwall
 			} catch (Exception ex) {
 				string errorMsg = ex.Message;
 				Exception innerEx = ex;
-				while (innerEx.InnerException != null) {
+				while ((innerEx = innerEx.InnerException) != null) {
 					errorMsg += $" [{innerEx.Message}]";
 				}
 				
