@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
@@ -24,6 +25,7 @@ namespace HSPI_TeslaPowerwall
 
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
         }
 
         public async Task<SiteInfo> GetSiteInfo() {
