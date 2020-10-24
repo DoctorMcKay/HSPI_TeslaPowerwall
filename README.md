@@ -1,7 +1,10 @@
-# Tesla Powerwall for HS3/HS4
+# Tesla Powerwall for HS4
 
 This is a free, open-source HomeSeer plugin that enables monitoring of a Tesla Powerwall system.
-This plugin is written for HS3, and will run on HS3 and HS4 on Windows or Linux.
+This plugin is written natively for HS4.
+
+It is also available for HS3 via the HomeSeer plugin updater, although the HS3 version is not
+receiving any new updates.
 
 # Installation
 
