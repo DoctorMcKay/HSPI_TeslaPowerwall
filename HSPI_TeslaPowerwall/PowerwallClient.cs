@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
@@ -9,23 +11,83 @@ using HomeSeer.PluginSdk.Logging;
 namespace HSPI_TeslaPowerwall
 {
     public class PowerwallClient {
+        public DateTime LastLogin { get; private set; }
+        public bool LoggingIn { get; private set; }
+        
         private const int RequestTimeoutMs = 10000;
         
         private readonly string _ipAddress;
         private readonly HttpClient _httpClient;
         private readonly JavaScriptSerializer _jsonSerializer;
         private readonly HSPI _hs;
+        private readonly string _email;
+        private readonly string _password;
 
-        public PowerwallClient(string ipAddress, HSPI hs) {
+        public PowerwallClient(string ipAddress, HSPI hs, string email, string password) {
             _ipAddress = ipAddress;
             HttpClientHandler handler = new HttpClientHandler();
             _httpClient = new HttpClient(handler);
             _jsonSerializer = new JavaScriptSerializer();
             _hs = hs;
+            _email = email;
+            _password = password;
 
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
             handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            handler.UseCookies = true;
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
+        }
+
+        public async Task Login() {
+            if (_email.Length == 0 || _password.Length == 0) {
+                throw new Exception("No credentials configured");
+            }
+            
+            LoggingIn = true;
+            
+            CancellationTokenSource cancelSrc = new CancellationTokenSource();
+            CancellationToken cancel = cancelSrc.Token;
+
+            Task timeout = Task.Delay(RequestTimeoutMs, cancel);
+
+            string loginUrl = $"https://{_ipAddress}/api/login/Basic";
+            _hs.WriteLog(ELogType.Trace, loginUrl);
+            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, loginUrl);
+
+            LoginRequest loginRequest = new LoginRequest {
+                email = _email,
+                password = _password,
+                username = "customer",
+                force_sm_off = false
+            };
+
+            string loginRequestString = _jsonSerializer.Serialize(loginRequest);
+            req.Content = new StringContent(loginRequestString, Encoding.UTF8, "application/json");
+            Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
+
+            Task finished = await Task.WhenAny(timeout, responseTask);
+            cancelSrc.Cancel();
+            if (finished == timeout) {
+                LoggingIn = false;
+                throw new Exception("Login request timed out");
+            }
+
+            HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result;
+            string responseText = await res.Content.ReadAsStringAsync();
+            dynamic content = _jsonSerializer.DeserializeObject(responseText);
+            _hs.WriteLog(ELogType.Trace, $"Login request complete with status {res.StatusCode}");
+            
+            req.Dispose();
+            res.Dispose();
+            
+            if (content.ContainsKey("error") && content["error"] != null) {
+                LoggingIn = false;
+                throw new Exception($"Login failed ({content["error"]})");
+            }
+
+            _hs.WriteLog(ELogType.Info, "Successfully logged into Gateway API");
+            LastLogin = DateTime.Now;
+            LoggingIn = false;
         }
 
         public async Task<SiteInfo> GetSiteInfo() {
@@ -87,7 +149,19 @@ namespace HSPI_TeslaPowerwall
             return (double) content["percentage"];
         }
 
+        public async Task<OperationConfig> GetSystemOperationConfig() {
+            dynamic content = await GetApiContent("/operation");
+            return new OperationConfig {
+                RealMode = content["real_mode"],
+                BackupReservePercent = content["backup_reserve_percent"]
+            };
+        }
+
         private async Task<dynamic> GetApiContent(string endpoint) {
+            if (LoggingIn) {
+                _hs.WriteLog(ELogType.Trace, $"Suppressing {endpoint} request because we are actively logging in.");
+            }
+            
             CancellationTokenSource cancelSrc = new CancellationTokenSource();
             CancellationToken cancel = cancelSrc.Token;
 
@@ -108,6 +182,16 @@ namespace HSPI_TeslaPowerwall
             string responseText = await res.Content.ReadAsStringAsync();
             dynamic content = _jsonSerializer.DeserializeObject(responseText);
             _hs.WriteLog(ELogType.Trace, $"Request complete with status {res.StatusCode}");
+
+            if (res.StatusCode == HttpStatusCode.Forbidden) {
+                // We need to log in
+                req.Dispose();
+                res.Dispose();
+                
+                _hs.WriteLog(ELogType.Trace, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
+                await Login();
+                return await GetApiContent(endpoint);
+            }
             
             req.Dispose();
             res.Dispose();
@@ -115,23 +199,27 @@ namespace HSPI_TeslaPowerwall
         }
     }
 
-    public struct SiteInfo
-    {
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    internal struct LoginRequest {
+        public string email;
+        public bool force_sm_off;
+        public string password;
+        public string username;
+    }
+
+    public struct SiteInfo {
         public string Name;
         public string Timezone;
     }
 
-    public struct SiteMaster
-    {
+    public struct SiteMaster {
         public string Status;
         public bool Running;
         public bool ConnectedToTesla;
     }
 
-    public struct Aggregates
-    {
-        public struct Entry
-        {
+    public struct Aggregates {
+        public struct Entry {
             public string LastCommunicationTime;
             public double InstantPower;
             public double InstantReactivePower;
@@ -149,9 +237,13 @@ namespace HSPI_TeslaPowerwall
         public Entry Solar;
     }
 
-    public struct GridStatus
-    {
+    public struct GridStatus {
         public string Status;
         public bool GridServicesActive;
+    }
+
+    public struct OperationConfig {
+        public string RealMode;
+        public decimal BackupReservePercent;
     }
 }

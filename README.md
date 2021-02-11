@@ -17,6 +17,12 @@ Internet access nor does it require your Tesla Account credentials. However, you
 be connected to your local network (either via Wi-Fi or wired connection), and must have a static
 IP address configured.
 
+**In Gateway firmware version 20.49.0, Tesla mandated a login in order to view energy metrics on
+the LAN. Therefore, you will need to configure your customer credentials in the plugin settings,
+*which are different from your Tesla.com account credentials.* If you do not know your customer
+credentials, they may be reset from the Gateway web panel by navigating to https://your.gateway.ip
+and clicking through the security warning.**
+
 You may configure a static IP address either in your router's control panel by assigning a static
 DHCP lease (this feature is not available on all routers), or directly in the Gateway's web control
 panel.
