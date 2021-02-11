@@ -38,7 +38,12 @@ namespace HSPI_TeslaPowerwall
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
         }
 
-        public async Task Login() {
+        private async Task Login() {
+            if (LoggingIn) {
+                _hs.WriteLog(ELogType.Trace, "Suppressing login attempt because we're already trying to login");
+                return;
+            }
+            
             if (_email.Length == 0 || _password.Length == 0) {
                 throw new Exception("No credentials configured");
             }
@@ -49,10 +54,8 @@ namespace HSPI_TeslaPowerwall
             CancellationToken cancel = cancelSrc.Token;
 
             Task timeout = Task.Delay(RequestTimeoutMs, cancel);
-
-            string loginUrl = $"https://{_ipAddress}/api/login/Basic";
-            _hs.WriteLog(ELogType.Trace, loginUrl);
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, loginUrl);
+            
+            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"https://{_ipAddress}/api/login/Basic");
 
             LoginRequest loginRequest = new LoginRequest {
                 email = _email,
@@ -160,6 +163,7 @@ namespace HSPI_TeslaPowerwall
         private async Task<dynamic> GetApiContent(string endpoint) {
             if (LoggingIn) {
                 _hs.WriteLog(ELogType.Trace, $"Suppressing {endpoint} request because we are actively logging in.");
+                throw new Exception($"Suppressing {endpoint} request because we are actively logging in.");
             }
             
             CancellationTokenSource cancelSrc = new CancellationTokenSource();
@@ -188,7 +192,7 @@ namespace HSPI_TeslaPowerwall
                 req.Dispose();
                 res.Dispose();
                 
-                _hs.WriteLog(ELogType.Trace, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
+                _hs.WriteLog(ELogType.Warning, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
                 await Login();
                 return await GetApiContent(endpoint);
             }
