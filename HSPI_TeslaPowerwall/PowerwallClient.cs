@@ -119,11 +119,11 @@ namespace HSPI_TeslaPowerwall
                 Site = GetAggregateEntry(content["site"]),
                 Battery = GetAggregateEntry(content["battery"]),
                 Load = GetAggregateEntry(content["load"]),
-                Solar = GetAggregateEntry(content["solar"])
+                Solar = content.ContainsKey("solar") ? GetAggregateEntry(content["solar"]) : GetBlankAggregateEntry()
             };
         }
 
-        private Aggregates.Entry GetAggregateEntry(dynamic content) {
+        private static Aggregates.Entry GetAggregateEntry(dynamic content) {
             return new Aggregates.Entry
             {
                 LastCommunicationTime = content["last_communication_time"],
@@ -135,6 +135,20 @@ namespace HSPI_TeslaPowerwall
                 EnergyImported = (double) content["energy_imported"],
                 InstantAverageVoltage = (double) content["instant_average_voltage"],
                 InstantTotalCurrent = (double) content["instant_total_current"]
+            };
+        }
+
+        private static Aggregates.Entry GetBlankAggregateEntry() {
+            return new Aggregates.Entry {
+                LastCommunicationTime = "1970-01-01T00:00:00.000Z",
+                InstantPower = 0.0,
+                InstantReactivePower = 0.0,
+                InstantApparentPower = 0.0,
+                Frequency = 0,
+                EnergyExported = 0.0,
+                EnergyImported = 0.0,
+                InstantAverageVoltage = 0.0,
+                InstantTotalCurrent = 0.0
             };
         }
 
