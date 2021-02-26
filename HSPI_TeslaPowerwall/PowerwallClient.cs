@@ -14,7 +14,7 @@ namespace HSPI_TeslaPowerwall
         public DateTime LastLogin { get; private set; }
         public bool LoggingIn { get; private set; }
         
-        private const int RequestTimeoutMs = 10000;
+        private const int RequestTimeoutMs = 5000;
         
         private readonly string _ipAddress;
         private readonly HttpClient _httpClient;

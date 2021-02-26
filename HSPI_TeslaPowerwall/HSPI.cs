@@ -21,9 +21,10 @@ namespace HSPI_TeslaPowerwall
 		private readonly Regex _ipRegex = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
-		private GatewayDeviceRefSet _devRefSet;
+		private GatewayDeviceRefSet? _devRefSet = null;
 		private Timer _pollTimer;
 		private Timer _checkConnectionTimer;
+		private int _pollFailureCount = 0;
 		private bool _connectingToGateway = false;
 		private bool _debugLogging;
 
@@ -175,19 +176,20 @@ namespace HSPI_TeslaPowerwall
 				WriteLog(ELogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at IP {_gatewayIp}");
 				FindDevices(info.Name);
 
-				_pollTimer = new Timer(2000) { AutoReset = true, Enabled = true };
+				_pollTimer = new Timer(2000) { AutoReset = false, Enabled = true };
 				_pollTimer.Elapsed += (src, arg) => { UpdateDeviceData(); };
 				_connectingToGateway = false;
 			} catch (Exception ex) {
-				string errorMsg = ex.Message;
-				Exception innerEx = ex;
-				while ((innerEx = innerEx.InnerException) != null) {
-					errorMsg += $" [{innerEx.Message}]";
-				}
-				
-				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}: {errorMsg}");
-				Status = PluginStatus.Fatal("Cannot contact Gateway: " + errorMsg);
+				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}: {GetExceptionMessageChain(ex)}");
+				Status = PluginStatus.Fatal($"Cannot contact Gateway: {GetInnermostException(ex).Message}");
 				_connectingToGateway = false;
+
+				if (_devRefSet != null) {
+					// If _devRefSet isn't null, we're guaranteed to have all features inside of it
+					int statusRef = ((GatewayDeviceRefSet) _devRefSet).SystemStatus;
+					HomeSeerSystem.UpdateFeatureValueByRef(statusRef, 2); // error
+					HomeSeerSystem.UpdateFeatureValueStringByRef(statusRef, GetInnermostException(ex).Message);
+				}
 				
 				_pollTimer = new Timer(60000) {Enabled = true};
 				_pollTimer.Elapsed += (src, arg) => { CheckGatewayConnection(); };
@@ -395,23 +397,40 @@ namespace HSPI_TeslaPowerwall
 				.WithLocation2("Tesla");
 		}
 
+		private void ResetPollTimer() {
+			_pollTimer.Stop();
+			_pollTimer.Start();
+		}
+
 		private async void UpdateDeviceData() {
 			WriteLog(ELogType.Trace, "Retrieving Powerwall data");
+
+			if (_devRefSet == null) {
+				WriteLog(ELogType.Trace, "Skipping Powerwall data retrieval because we don't have our devRefSet");
+				ResetPollTimer();
+				return;
+			}
+
+			GatewayDeviceRefSet refSet = (GatewayDeviceRefSet) _devRefSet;
 
 			try {
 				// Get only site master right now because if the system is down, we don't want to retrieve anything else
 				SiteMaster siteMaster = await _client.GetSiteMaster();
 				WriteLog(ELogType.Trace, "Powerwall site master data retrieved successfully");
 
-				HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
-				HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.SystemStatus, siteMaster.Running ? 1 : 0);
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.SystemStatus, ""); // clear any error message we might have
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
 
 				if (!siteMaster.Running) {
 					WriteLog(ELogType.Debug, "Skipping statistics requests because system is stopped");
+					ResetPollTimer();
 					return;
 				}
 			} catch (Exception ex) {
-				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall sitemaster data: {ex.Message}");
+				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall sitemaster data: {GetExceptionMessageChain(ex)}");
+				HandlePollFailure(GetInnermostException(ex).Message);
+				ResetPollTimer();
 				return;
 			}
 			
@@ -422,30 +441,79 @@ namespace HSPI_TeslaPowerwall
 				aggregates = await _client.GetAggregates();
 				gridStatus = await _client.GetGridStatus();
 			} catch (Exception ex) {
-				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall data: {ex.Message}");
+				ex = GetInnermostException(ex);
+				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall data: {GetExceptionMessageChain(ex)}");
+				HandlePollFailure(GetInnermostException(ex).Message);
+				ResetPollTimer();
 				return;
 			}
 
 			WriteLog(ELogType.Trace, "Powerwall data retrieved successfully");
+			_pollFailureCount = 0;
 
-			double chargePct = Math.Round(await _client.GetSystemChargePercentage(), 1);
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ChargePercent, chargePct);
-			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.ChargePercent, chargePct + "%");
+			try {
+				double chargePct = Math.Round(await _client.GetSystemChargePercentage(), 1);
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.ChargePercent, chargePct);
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.ChargePercent, chargePct + "%");
 
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.GridStatus, gridStatus.Status == "SystemGridConnected" ? 1 : 0);
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.GridStatus, gridStatus.Status == "SystemGridConnected" ? 1 : 0);
 
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SitePower, Math.Round(aggregates.Load.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.SitePower, GetPowerString(aggregates.Load.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.BatteryPower, Math.Round(aggregates.Battery.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.BatteryPower, GetPowerString(aggregates.Battery.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SolarPower, Math.Round(aggregates.Solar.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.GridPower, Math.Round(aggregates.Site.InstantPower));
-			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.SitePower, Math.Round(aggregates.Load.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.SitePower, GetPowerString(aggregates.Load.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.BatteryPower, Math.Round(aggregates.Battery.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.BatteryPower, GetPowerString(aggregates.Battery.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.SolarPower, Math.Round(aggregates.Solar.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueByRef(refSet.GridPower, Math.Round(aggregates.Site.InstantPower));
+				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
+			} catch (Exception ex) {
+				WriteLog(ELogType.Error, $"Unable to update Powerwall data: {GetExceptionMessageChain(ex)}");
+				HandlePollFailure(GetInnermostException(ex).Message);
+			}
+
+			ResetPollTimer();
+		}
+
+		private void HandlePollFailure(string errorMessage) {
+			if (_devRefSet == null) {
+				// Dunno how this is possible
+				WriteLog(ELogType.Error, $"Somehow we had a poll failure but no ref set available yet? {errorMessage}");
+				return;
+			}
+			
+			if (++_pollFailureCount < 5) {
+				// Only report error status after 5 consecutive poll failures
+				return;
+			}
+
+			int statusRef = ((GatewayDeviceRefSet) _devRefSet).SystemStatus;
+			// ReSharper disable once CompareOfFloatsByEqualityOperator
+			if (HomeSeerSystem.GetFeatureByRef(statusRef).Value == 2) {
+				// Status is already error
+				return;
+			}
+
+			HomeSeerSystem.UpdateFeatureValueByRef(statusRef, 2);
+			HomeSeerSystem.UpdateFeatureValueStringByRef(statusRef, errorMessage);
 		}
 
 		private static string GetPowerString(double watts) {
 			return $"{Math.Round(watts / 1000, 1)} kW";
+		}
+
+		private static string GetExceptionMessageChain(Exception ex) {
+			string message = ex.Message;
+			while (ex.InnerException != null) {
+				ex = ex.InnerException;
+				message += $" [{ex.Message}]";
+			}
+
+			return message;
+		}
+
+		private static Exception GetInnermostException(Exception ex) {
+			while (ex.InnerException != null) ex = ex.InnerException;
+			return ex;
 		}
 
 		public void WriteLog(ELogType logType, string message, [CallerLineNumber] int lineNumber = 0, [CallerMemberName] string caller = null) {
