@@ -385,13 +385,27 @@ namespace HSPI_TeslaPowerwall
 		private async void UpdateDeviceData() {
 			WriteLog(ELogType.Trace, "Retrieving Powerwall data");
 
-			SiteMaster siteMaster;
+			try {
+				// Get only site master right now because if the system is down, we don't want to retrieve anything else
+				SiteMaster siteMaster = await _client.GetSiteMaster();
+				WriteLog(ELogType.Trace, "Powerwall site master data retrieved successfully");
+
+				HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
+				HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
+
+				if (!siteMaster.Running) {
+					WriteLog(ELogType.Debug, "Skipping statistics requests because system is stopped");
+					return;
+				}
+			} catch (Exception ex) {
+				WriteLog(ELogType.Error, $"Unable to retrieve Powerwall sitemaster data: {ex.Message}");
+				return;
+			}
+			
 			Aggregates aggregates;
 			GridStatus gridStatus;
 
-			try
-			{
-				siteMaster = await _client.GetSiteMaster();
+			try {
 				aggregates = await _client.GetAggregates();
 				gridStatus = await _client.GetGridStatus();
 			} catch (Exception ex) {
@@ -400,9 +414,6 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			WriteLog(ELogType.Trace, "Powerwall data retrieved successfully");
-
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.SystemStatus, siteMaster.Running ? 1 : 0);
-			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ConnectedToTesla, siteMaster.ConnectedToTesla ? 1 : 0);
 
 			double chargePct = Math.Round(await _client.GetSystemChargePercentage(), 1);
 			HomeSeerSystem.UpdateFeatureValueByRef(_devRefSet.ChargePercent, chargePct);
@@ -420,7 +431,7 @@ namespace HSPI_TeslaPowerwall
 			HomeSeerSystem.UpdateFeatureValueStringByRef(_devRefSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
 		}
 
-		private string GetPowerString(double watts) {
+		private static string GetPowerString(double watts) {
 			return $"{Math.Round(watts / 1000, 1)} kW";
 		}
 
