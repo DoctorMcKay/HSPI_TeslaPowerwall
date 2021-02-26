@@ -94,7 +94,7 @@ namespace HSPI_TeslaPowerwall
         }
 
         public async Task<SiteInfo> GetSiteInfo() {
-            dynamic content = await GetApiContent("/site_info/site_name");
+            dynamic content = await GetApiContent("/site_info/site_name", true);
             return new SiteInfo
             {
                 Name = content["site_name"],
@@ -103,7 +103,7 @@ namespace HSPI_TeslaPowerwall
         }
 
         public async Task<SiteMaster> GetSiteMaster() {
-            dynamic content = await GetApiContent("/sitemaster");
+            dynamic content = await GetApiContent("/sitemaster", true);
             return new SiteMaster
             {
                 Status = content["status"],
@@ -113,7 +113,7 @@ namespace HSPI_TeslaPowerwall
         }
 
         public async Task<Aggregates> GetAggregates() {
-            dynamic content = await GetApiContent("/meters/aggregates");
+            dynamic content = await GetApiContent("/meters/aggregates", true);
             return new Aggregates
             {
                 Site = GetAggregateEntry(content["site"]),
@@ -153,7 +153,7 @@ namespace HSPI_TeslaPowerwall
         }
 
         public async Task<GridStatus> GetGridStatus() {
-            dynamic content = await GetApiContent("/system_status/grid_status");
+            dynamic content = await GetApiContent("/system_status/grid_status", true);
             return new GridStatus
             {
                 Status = content["grid_status"],
@@ -162,19 +162,19 @@ namespace HSPI_TeslaPowerwall
         }
 
         public async Task<double> GetSystemChargePercentage() {
-            dynamic content = await GetApiContent("/system_status/soe");
+            dynamic content = await GetApiContent("/system_status/soe", true);
             return (double) content["percentage"];
         }
 
         public async Task<OperationConfig> GetSystemOperationConfig() {
-            dynamic content = await GetApiContent("/operation");
+            dynamic content = await GetApiContent("/operation", true);
             return new OperationConfig {
                 RealMode = content["real_mode"],
                 BackupReservePercent = content["backup_reserve_percent"]
             };
         }
 
-        private async Task<dynamic> GetApiContent(string endpoint) {
+        private async Task<dynamic> GetApiContent(string endpoint, bool failOnUnsuccessfulCode = false) {
             if (LoggingIn) {
                 _hs.WriteLog(ELogType.Trace, $"Suppressing {endpoint} request because we are actively logging in.");
                 throw new Exception($"Suppressing {endpoint} request because we are actively logging in.");
@@ -209,6 +209,13 @@ namespace HSPI_TeslaPowerwall
                 _hs.WriteLog(ELogType.Warning, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
                 await Login();
                 return await GetApiContent(endpoint);
+            }
+
+            if (failOnUnsuccessfulCode && !res.IsSuccessStatusCode) {
+                HttpStatusCode code = res.StatusCode;
+                req.Dispose();
+                res.Dispose();
+                throw new Exception($"Request \"{endpoint}\" failed with status code \"{code}\"");
             }
             
             req.Dispose();
