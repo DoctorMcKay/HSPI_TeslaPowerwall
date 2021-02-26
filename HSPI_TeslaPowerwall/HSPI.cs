@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
 using System.Timers;
@@ -231,7 +232,8 @@ namespace HSPI_TeslaPowerwall
 				FeatureFactory factory = FeatureFactory.CreateFeature(Name, devRefSet.Root)
 					.WithName("System Status")
 					.AddGraphicForValue("/images/HomeSeer/status/off.gif", 0, "Stopped")
-					.AddGraphicForValue("/images/HomeSeer/status/on.gif", 1, "Running");
+					.AddGraphicForValue("/images/HomeSeer/status/on.gif", 1, "Running")
+					.AddGraphicForValue("/images/HomeSeer/status/alarm.png", 2, "Error");
 				
 				InitializeFeatureFactory(factory);
 
@@ -245,6 +247,17 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.ClearStatusControlsByRef(devRefSet.Root);
 			} else {
 				devRefSet.SystemStatus = (int) systemStatus;
+			}
+			
+			// UPDATE 2021-02-25: Add error status to SystemStatus device if it's missing
+			HsFeature systemStatusFeature = HomeSeerSystem.GetFeatureByRef(devRefSet.SystemStatus);
+			// ReSharper disable once CompareOfFloatsByEqualityOperator
+			if (!systemStatusFeature.StatusGraphics.Values.Any(graphic => !graphic.IsRange && graphic.Value == 2)) {
+				WriteLog(ELogType.Info, $"Adding error graphic to system status feature {systemStatusFeature.Ref}");
+				HomeSeerSystem.AddStatusGraphicToFeature(
+					systemStatusFeature.Ref,
+					new StatusGraphic("/images/HomeSeer/status/alarm.png", 2, "Error")
+				);
 			}
 
 			if (connectedToTesla == null) {
