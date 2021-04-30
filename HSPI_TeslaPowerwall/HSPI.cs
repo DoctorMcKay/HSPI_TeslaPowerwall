@@ -20,6 +20,8 @@ namespace HSPI_TeslaPowerwall
 
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
+		private string _gatewayUsername = "";
+		private string _gatewayPassword = "";
 		private GatewayDeviceRefSet _devRefSet;
 		private Timer _pollTimer;
 		private IPlugInAPI.enumInterfaceStatus _interfaceStatus = IPlugInAPI.enumInterfaceStatus.OK;
@@ -59,6 +61,8 @@ namespace HSPI_TeslaPowerwall
 			this._pollTimer?.Stop();
 			
 			this._gatewayIp = hs.GetINISetting("GatewayNetwork", "ip", "", IniFilename);
+			this._gatewayUsername = hs.GetINISetting("GatewayCredentials", "username", "", IniFilename);
+			this._gatewayPassword = hs.GetINISetting("GatewayCredentials", "password", "", IniFilename);
 
 			Program.WriteLog(LogType.Info, $"Attempting to connect to Gateway at IP \"{this._gatewayIp}\"");
 
@@ -69,7 +73,7 @@ namespace HSPI_TeslaPowerwall
 				return;
 			}
 			
-			this._client = new PowerwallClient(this._gatewayIp);
+			this._client = new PowerwallClient(this._gatewayIp, this._gatewayUsername, this._gatewayPassword);
 
 			try
 			{
@@ -130,6 +134,23 @@ namespace HSPI_TeslaPowerwall
 			sb.Append(textBox.Build());
 			sb.Append("</td></tr>");
 
+			sb.Append("<tr><td class=\"tablecell\" style=\"width:200px\" align=\"left\">Gateway Customer Email:</td>");
+			sb.Append("<td class=\"tablecell\">");
+			textBox = new clsJQuery.jqTextBox("GatewayUsername", "text", this._gatewayUsername, pageName, 30, true);
+			sb.Append(textBox.Build());
+			sb.Append("</td></tr>");
+			
+			sb.Append("<tr><td class=\"tablecell\" style=\"width:200px\" align=\"left\">Gateway Customer Password:</td>");
+			sb.Append("<td class=\"tablecell\">");
+			textBox = new clsJQuery.jqTextBox("GatewayPassword", "password", this._gatewayPassword.Length == 0 ? "" : "*****", pageName, 30, true);
+			sb.Append(textBox.Build());
+			sb.Append("</td></tr>");
+
+			sb.Append("<tr><td class=\"tablecell\" colspan=\"2\" align=\"left\">");
+			sb.Append("<p>Prior to Gateway firmware version 20.49.0, authentication was not required to retrieve energy statistics. In later versions, authentication is required.</p>");
+			sb.Append("<p><b>These credentials <u>are not</u> your Tesla.com or Tesla app credentials.</b> These credentials are set in the Gateway's web administration panel, which can be accessed at https://your.gateway.ip on your local network.</p>");
+			sb.Append("</td></tr>");
+
 			sb.Append("</table>");
 
 			clsJQuery.jqButton doneBtn = new clsJQuery.jqButton("DoneBtn", "Done", pageName, false);
@@ -160,9 +181,26 @@ namespace HSPI_TeslaPowerwall
 			NameValueCollection postData = HttpUtility.ParseQueryString(data);
 
 			string gwIp = postData.Get("GatewayIP");
-			hs.SaveINISetting("GatewayNetwork", "ip", gwIp, IniFilename);
-			this._gatewayIp = gwIp;
-			Program.WriteLog(LogType.Info, $"Updating Gateway IP to \"{gwIp}\"");
+			if (gwIp != null) {
+				hs.SaveINISetting("GatewayNetwork", "ip", gwIp, IniFilename);
+				this._gatewayIp = gwIp;
+				Program.WriteLog(LogType.Info, $"Updating Gateway IP to \"{gwIp}\"");
+			}
+
+			string gwUsername = postData.Get("GatewayUsername");
+			if (gwUsername != null) {
+				hs.SaveINISetting("GatewayCredentials", "username", gwUsername, IniFilename);
+				this._gatewayUsername = gwUsername;
+				Program.WriteLog(LogType.Info, $"Updating Gateway username to \"{gwUsername}\"");
+			}
+
+			string gwPassword = postData.Get("GatewayPassword");
+			if (gwPassword != null && gwPassword != "*****") {
+				hs.SaveINISetting("GatewayCredentials", "password", gwPassword, IniFilename);
+				this._gatewayPassword = gwPassword;
+				Program.WriteLog(LogType.Info, "Updating Gateway password");
+			}
+			
 			CheckGatewayConnection();
 
 			return "";
