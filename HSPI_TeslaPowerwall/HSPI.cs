@@ -217,7 +217,12 @@ namespace HSPI_TeslaPowerwall
 		}
 
 		private void FindDevices(string siteName) {
-			string addressBase = $"TGW:{_gatewayIp}";
+			string gatewayIp = _gatewayIp;
+			if (_client.UpstreamIpAddress != "") {
+				gatewayIp = _client.UpstreamIpAddress;
+			}
+			
+			string addressBase = $"TGW:{gatewayIp}";
 
 			int? root = HomeSeerSystem.GetDeviceByAddress(addressBase)?.Ref;
 			int? systemStatus = HomeSeerSystem.GetDeviceByAddress($"{addressBase}:SystemStatus")?.Ref;

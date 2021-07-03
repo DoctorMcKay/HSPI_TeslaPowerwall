@@ -14,6 +14,7 @@ namespace HSPI_TeslaPowerwall
     public class PowerwallClient {
         public DateTime LastLogin { get; private set; }
         public bool LoggingIn { get; private set; }
+        public string UpstreamIpAddress { get; private set; }
         
         private const int RequestTimeoutMs = 5000;
         
@@ -35,8 +36,34 @@ namespace HSPI_TeslaPowerwall
             _email = email;
             _password = password;
 
+            UpstreamIpAddress = "";
+
             // Powerwall Gateway uses a self-signed certificate, so let's accept it unconditionally
-            handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+            handler.ServerCertificateCustomValidationCallback = (sender, certificate, chain, sslPolicyErrors) => {
+                if (certificate.SubjectName.Name != null) {
+                    try {
+                        string commonName = certificate.SubjectName.Name
+                            .Split(',')
+                            .Select(i => i.Trim())
+                            .First(i => i.StartsWith("CN="))
+                            .Substring(3);
+
+                        if (commonName.StartsWith("TLSPROXY:")) {
+                            string upstreamIp = commonName.Substring(9);
+                            if (upstreamIp != UpstreamIpAddress) {
+                                UpstreamIpAddress = upstreamIp;
+                                _hs.WriteLog(ELogType.Info, $"Detected TLS proxy for upstream address {UpstreamIpAddress}");
+                            }
+                        }
+                    } catch (Exception) {
+                        // No CN, ignore
+                    }
+                }
+
+                // Trust certificate always
+                return true;
+            };
+            
             handler.UseCookies = true;
             ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls11 | SecurityProtocolType.Tls12;
         }
