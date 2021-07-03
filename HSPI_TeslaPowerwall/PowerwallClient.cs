@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text;
@@ -17,14 +18,16 @@ namespace HSPI_TeslaPowerwall
         private const int RequestTimeoutMs = 5000;
         
         private readonly string _ipAddress;
+        private readonly ushort _port;
         private readonly HttpClient _httpClient;
         private readonly JavaScriptSerializer _jsonSerializer;
         private readonly HSPI _hs;
         private readonly string _email;
         private readonly string _password;
 
-        public PowerwallClient(string ipAddress, HSPI hs, string email, string password) {
+        public PowerwallClient(string ipAddress, ushort port, HSPI hs, string email, string password) {
             _ipAddress = ipAddress;
+            _port = port;
             HttpClientHandler handler = new HttpClientHandler();
             _httpClient = new HttpClient(handler);
             _jsonSerializer = new JavaScriptSerializer();
@@ -55,7 +58,7 @@ namespace HSPI_TeslaPowerwall
 
             Task timeout = Task.Delay(RequestTimeoutMs, cancel);
             
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"https://{_ipAddress}/api/login/Basic");
+            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"https://{_ipAddress}:{_port}/api/login/Basic");
 
             LoginRequest loginRequest = new LoginRequest {
                 email = _email,
@@ -185,8 +188,8 @@ namespace HSPI_TeslaPowerwall
 
             Task timeout = Task.Delay(RequestTimeoutMs, cancel);
 
-            _hs.WriteLog(ELogType.Trace, $"Requesting https://{_ipAddress}/api{endpoint}");
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}/api{endpoint}");
+            _hs.WriteLog(ELogType.Trace, $"Requesting https://{_ipAddress}:{_port}/api{endpoint}");
+            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}:{_port}/api{endpoint}");
             Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
 
             Task finished = await Task.WhenAny(timeout, responseTask);

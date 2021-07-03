@@ -21,6 +21,7 @@ namespace HSPI_TeslaPowerwall
 		private readonly Regex _ipRegex = new Regex(@"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$");
 		private PowerwallClient _client;
 		private string _gatewayIp = "";
+		private ushort _gatewayPort = 443;
 		private GatewayDeviceRefSet? _devRefSet = null;
 		private Timer _pollTimer;
 		private Timer _checkConnectionTimer;
@@ -38,10 +39,12 @@ namespace HSPI_TeslaPowerwall
 				.CreateSettingsPage("TeslaPowerwallSettings", "Tesla Powerwall Settings")
 				.WithLabel("plugin_status", "Status (refresh to update)", "x")
 				.WithInput("gateway_ip", "Backup Gateway LAN IP")
+				.WithInput("gateway_port", "Backup Gateway Port")
 				.WithInput("gateway_username", "Backup Gateway Customer Email")
 				.WithInput("gateway_password", "Backup Gateway Customer Password", EInputType.Password)
 				.WithLabel("auth_note", "", "Prior to Gateway firmware version 20.49.0, authentication was not required to retrieve energy statistics. In later versions, authentication is required.")
 				.WithLabel("auth_note_2", "", "<b>These credentials <u>are not</u> your Tesla.com or Tesla app credentials.</b> These credentials are set in the Gateway's web administration panel, which can be accessed at https://your.gateway.ip on your local network.")
+				.WithLabel("port_note", "", "The default port is 443, and should not need to be changed by most users.")
 				.WithGroup("debug_group", "<hr>", new AbstractView[] {
 					new LabelView("debug_support_link", "Support and Documentation", "<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">HomeSeer Forum</a>"), 
 					new LabelView("debug_system_id", "System ID (include this with any support requests)", analytics.CustomSystemId),
@@ -72,6 +75,7 @@ namespace HSPI_TeslaPowerwall
 			
 			((LabelView) Settings.Pages[0].GetViewById("plugin_status")).Value = statusText;
 			Settings.Pages[0].GetViewById("gateway_ip").UpdateValue(_gatewayIp);
+			Settings.Pages[0].GetViewById("gateway_port").UpdateValue(_gatewayPort.ToString());
 			
 			string username = HomeSeerSystem.GetINISetting("GatewayCredentials", "username", "", SettingsFileName);
 			string password = HomeSeerSystem.GetINISetting("GatewayCredentials", "password", "", SettingsFileName);
@@ -100,17 +104,26 @@ namespace HSPI_TeslaPowerwall
 					// Make sure it's a valid IP format
 					if (newValue == "" || _ipRegex.Matches(newValue).Count > 0) {
 						HomeSeerSystem.SaveINISetting("GatewayNetwork", "ip", newValue, SettingsFileName);
-						
-						// Enqueue CheckGatewayConnection in 500ms. We use a timer here because it's possible to update
-						// multiple fields in the same request, and we don't want to try to reconnect for every field.
-						_checkConnectionTimer?.Stop();
-						_checkConnectionTimer = new Timer(500) {Enabled = true, AutoReset = false};
-						_checkConnectionTimer.Elapsed += (src, arg) => CheckGatewayConnection();
+						_enqueueGatewayReconnect();
 						return true;
 					}
 
 					throw new Exception("Invalid IP address format.");
 				
+				case "gateway_port":
+					newValue = changedView.GetStringValue();
+					if (newValue == currentView.GetStringValue()) {
+						return true; // no change
+					}
+
+					if (!ushort.TryParse(changedView.GetStringValue(), out ushort newPort)) {
+						throw new Exception("Invalid port.");
+					}
+					
+					HomeSeerSystem.SaveINISetting("GatewayNetwork", "port", newPort.ToString(), SettingsFileName);
+					_enqueueGatewayReconnect();
+					return true;
+
 				case "gateway_username":
 				case "gateway_password":
 					newValue = changedView.GetStringValue();
@@ -124,10 +137,8 @@ namespace HSPI_TeslaPowerwall
 						newValue,
 						SettingsFileName
 					);
-					
-					_checkConnectionTimer?.Stop();
-					_checkConnectionTimer = new Timer(500) {Enabled = true, AutoReset = false};
-					_checkConnectionTimer.Elapsed += (src, arg) => CheckGatewayConnection();
+
+					_enqueueGatewayReconnect();
 					return true;
 				
 				case "debug_log":
@@ -137,6 +148,14 @@ namespace HSPI_TeslaPowerwall
 			
 			WriteLog(ELogType.Info, $"Request to save unknown setting {currentView.Id}");
 			return false;
+		}
+
+		private void _enqueueGatewayReconnect() {
+			// Enqueue CheckGatewayConnection in 500ms. We use a timer here because it's possible to update
+			// multiple fields in the same request, and we don't want to try to reconnect for every field.
+			_checkConnectionTimer?.Stop();
+			_checkConnectionTimer = new Timer(500) {Enabled = true, AutoReset = false};
+			_checkConnectionTimer.Elapsed += (src, arg) => CheckGatewayConnection();
 		}
 
 		protected override void BeforeReturnStatus() {
@@ -157,10 +176,11 @@ namespace HSPI_TeslaPowerwall
 			_pollTimer?.Stop();
 			
 			_gatewayIp = HomeSeerSystem.GetINISetting("GatewayNetwork", "ip", "", SettingsFileName);
+			_gatewayPort = ushort.Parse(HomeSeerSystem.GetINISetting("GatewayNetwork", "port", "443", SettingsFileName));
 			string username = HomeSeerSystem.GetINISetting("GatewayCredentials", "username", "", SettingsFileName);
 			string password = HomeSeerSystem.GetINISetting("GatewayCredentials", "password", "", SettingsFileName);
 
-			WriteLog(ELogType.Info, $"Attempting to connect to Gateway at IP \"{_gatewayIp}\"");
+			WriteLog(ELogType.Info, $"Attempting to connect to Gateway at address \"{_gatewayIp}:{_gatewayPort}\"");
 
 			if (_ipRegex.Matches(_gatewayIp).Count == 0) {
 				Status = PluginStatus.Fatal("No Tesla Gateway IP address configured");
@@ -169,18 +189,18 @@ namespace HSPI_TeslaPowerwall
 			}
 
 			try {
-				_client = new PowerwallClient(_gatewayIp, this, username, password);
+				_client = new PowerwallClient(_gatewayIp, _gatewayPort, this, username, password);
 				SiteInfo info = await _client.GetSiteInfo();
 				// It worked!
 				Status = PluginStatus.Ok();
-				WriteLog(ELogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at IP {_gatewayIp}");
+				WriteLog(ELogType.Info, $"Successfully contacted Gateway \"{info.Name}\" at address {_gatewayIp}:{_gatewayPort}");
 				FindDevices(info.Name);
 
 				_pollTimer = new Timer(2000) { AutoReset = false, Enabled = true };
 				_pollTimer.Elapsed += (src, arg) => { UpdateDeviceData(); };
 				_connectingToGateway = false;
 			} catch (Exception ex) {
-				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}: {GetExceptionMessageChain(ex)}");
+				WriteLog(ELogType.Error, $"Cannot get site master from Gateway {_gatewayIp}:{_gatewayPort}: {GetExceptionMessageChain(ex)}");
 				Status = PluginStatus.Fatal($"Cannot contact Gateway: {GetInnermostException(ex).Message}");
 				_connectingToGateway = false;
 
