@@ -1,6 +1,10 @@
 name: CI
 
-on: [push]
+on:
+  push:
+    branches:
+      # Only run on branch push, not tag push
+      - '**'
 
 jobs:
   build:
@@ -30,6 +34,9 @@ jobs:
         cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
         cp HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
         cp install.txt artifacts\install.txt
+        Set-Variable -Name release_version -Value (Get-ChildItem -Filter "artifacts\HSPI_IRobot.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
+        echo "release_version=$release_version"
+        echo "release_version=$release_version" >> $env:GITHUB_ENV
     
     - name: Stage debug artifacts
       run: |
@@ -38,13 +45,13 @@ jobs:
         cp HSPI_TeslaPowerwall.exe.config artifacts-debug\HSPI_TeslaPowerwall.exe.config
     
     - name: Upload artifacts
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v3
       with:
-        name: Plugin
+        name: TeslaPowerwall_${{ env.release_version }}
         path: artifacts
     
     - name: Upload debug artifacts
-      uses: actions/upload-artifact@v1
+      uses: actions/upload-artifact@v3
       with:
         name: Debug Build
         path: artifacts-debug
