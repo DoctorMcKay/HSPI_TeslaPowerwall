@@ -84,43 +84,42 @@ namespace HSPI_TeslaPowerwall
             CancellationToken cancel = cancelSrc.Token;
 
             Task timeout = Task.Delay(RequestTimeoutMs, cancel);
-            
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"https://{_ipAddress}:{_port}/api/login/Basic");
 
-            LoginRequest loginRequest = new LoginRequest {
-                email = _email,
-                password = _password,
-                username = "customer",
-                force_sm_off = false
-            };
+            using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Post, $"https://{_ipAddress}:{_port}/api/login/Basic")) {
+                req.Headers.Host = "teg"; // necessary to pass the gateway's SNI checks
 
-            string loginRequestString = _jsonSerializer.Serialize(loginRequest);
-            req.Content = new StringContent(loginRequestString, Encoding.UTF8, "application/json");
-            Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
+                string loginRequestString = _jsonSerializer.Serialize(new {
+                    email = _email,
+                    password = _password,
+                    username = "customer",
+                    force_sm_off = false
+                });
 
-            Task finished = await Task.WhenAny(timeout, responseTask);
-            cancelSrc.Cancel();
-            if (finished == timeout) {
-                LoggingIn = false;
-                throw new Exception("Login request timed out");
-            }
+                req.Content = new StringContent(loginRequestString, Encoding.UTF8, "application/json");
+                Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
 
-            HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result;
-            string responseText = await res.Content.ReadAsStringAsync();
-            dynamic content = _jsonSerializer.DeserializeObject(responseText);
-            _hs.WriteLog(ELogType.Trace, $"Login request complete with status {res.StatusCode}");
-            
-            req.Dispose();
-            res.Dispose();
-            
-            if (content.ContainsKey("error") && content["error"] != null) {
-                LoggingIn = false;
-                throw new Exception($"Login failed ({content["error"]})");
-            }
+                Task finished = await Task.WhenAny(timeout, responseTask);
+                cancelSrc.Cancel();
+                if (finished == timeout) {
+                    LoggingIn = false;
+                    throw new Exception("Login request timed out");
+                }
 
-            _hs.WriteLog(ELogType.Info, "Successfully logged into Gateway API");
-            LastLogin = DateTime.Now;
-            LoggingIn = false;
+                using (HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result) {
+                    string responseText = await res.Content.ReadAsStringAsync();
+                    dynamic content = _jsonSerializer.DeserializeObject(responseText);
+                    _hs.WriteLog(ELogType.Trace, $"Login request complete with status {res.StatusCode}");
+
+                    if (content.ContainsKey("error") && content["error"] != null) {
+                        LoggingIn = false;
+                        throw new Exception($"Login failed ({content["error"]})");
+                    }
+
+                    _hs.WriteLog(ELogType.Info, "Successfully logged into Gateway API");
+                    LastLogin = DateTime.Now;
+                    LoggingIn = false;
+                } // using HttpResponseMessage
+            } // using HttpRequestMessage
         }
 
         public async Task<SiteInfo> GetSiteInfo() {
@@ -216,50 +215,37 @@ namespace HSPI_TeslaPowerwall
             Task timeout = Task.Delay(RequestTimeoutMs, cancel);
 
             _hs.WriteLog(ELogType.Trace, $"Requesting https://{_ipAddress}:{_port}/api{endpoint}");
-            HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}:{_port}/api{endpoint}");
-            Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
+            using (HttpRequestMessage req = new HttpRequestMessage(HttpMethod.Get, $"https://{_ipAddress}:{_port}/api{endpoint}")) {
+                req.Headers.Host = "teg"; // necessary to pass the gateway's SNI checks
+                Task<HttpResponseMessage> responseTask = _httpClient.SendAsync(req, cancel);
 
-            Task finished = await Task.WhenAny(timeout, responseTask);
-            cancelSrc.Cancel();
-            if (finished == timeout) {
-                string[] parts = endpoint.Split('/');
-                throw new Exception($"{parts[parts.Length - 1]} request timed out");
-            }
+                Task finished = await Task.WhenAny(timeout, responseTask);
+                cancelSrc.Cancel();
+                if (finished == timeout) {
+                    string[] parts = endpoint.Split('/');
+                    throw new Exception($"{parts[parts.Length - 1]} request timed out");
+                }
 
-            HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result;
-            string responseText = await res.Content.ReadAsStringAsync();
-            dynamic content = _jsonSerializer.DeserializeObject(responseText);
-            _hs.WriteLog(ELogType.Trace, $"Request complete with status {res.StatusCode}");
+                using (HttpResponseMessage res = ((Task<HttpResponseMessage>) finished).Result) {
+                    string responseText = await res.Content.ReadAsStringAsync();
+                    dynamic content = _jsonSerializer.DeserializeObject(responseText);
+                    _hs.WriteLog(ELogType.Trace, $"Request complete with status {res.StatusCode}");
 
-            if (res.StatusCode == HttpStatusCode.Forbidden) {
-                // We need to log in
-                req.Dispose();
-                res.Dispose();
-                
-                _hs.WriteLog(ELogType.Warning, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
-                await Login();
-                return await GetApiContent(endpoint);
-            }
+                    if (res.StatusCode == HttpStatusCode.Forbidden) {
+                        // We need to log in
+                        _hs.WriteLog(ELogType.Warning, $"Request to {endpoint} failed with status code Forbidden; attempting to login");
+                        await Login();
+                        return await GetApiContent(endpoint);
+                    }
 
-            if (failOnUnsuccessfulCode && !res.IsSuccessStatusCode) {
-                HttpStatusCode code = res.StatusCode;
-                req.Dispose();
-                res.Dispose();
-                throw new Exception($"Request \"{endpoint}\" failed with status code \"{code}\"");
-            }
-            
-            req.Dispose();
-            res.Dispose();
-            return content;
+                    if (failOnUnsuccessfulCode && !res.IsSuccessStatusCode) {
+                        throw new Exception($"Request \"{endpoint}\" failed with status code \"{res.StatusCode}\"");
+                    }
+                    
+                    return content;
+                } // using HttpResponseMessage
+            } // using HttpRequestMessage
         }
-    }
-
-    [SuppressMessage("ReSharper", "InconsistentNaming")]
-    internal struct LoginRequest {
-        public string email;
-        public bool force_sm_off;
-        public string password;
-        public string username;
     }
 
     public struct SiteInfo {
