@@ -40,7 +40,7 @@ jobs:
         cp HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
         cp HSPI_TeslaPowerwall\bin\Release\*.dll artifacts
         cp install.txt artifacts\install.txt
-        $release_version = (Get-ChildItem -Filter "artifacts\HSPI_IRobot.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
+        $release_version = (Get-ChildItem -Filter "artifacts\HSPI_TeslaPowerwall.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
         echo "release_version=$release_version"
         echo "release_version=$release_version" >> $env:GITHUB_ENV
     
