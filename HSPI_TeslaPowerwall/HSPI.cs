@@ -53,7 +53,6 @@ public class HSPI : AbstractPlugin {
 			.WithInput("gateway_password", "Backup Gateway Customer Password", EInputType.Password)
 			.WithLabel("auth_note", "", "Prior to Gateway software version 20.49.0, authentication was not required to retrieve energy statistics. In later versions, authentication is required.")
 			.WithLabel("auth_note_2", "", "<b>These credentials <u>are not</u> your Tesla.com or Tesla app credentials.</b> These credentials are set in the Gateway's web administration panel, which can be accessed at https://your.gateway.ip on your local network.")
-			.WithLabel("proxy_note", "", "Gateway software version 21.20.2 introduced a bug which can prevent the plugin from successfully connecting to the Gateway, especially on Linux under Mono. If you are experiencing connection problems, you may need to <a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay/1482377-using-a-tls-proxy-to-connect-to-the-gateway\" target=\"_blank\">connect to the Gateway using a proxy script</a>.")
 			.WithGroup("debug_group", "<hr>", new AbstractView[] {
 				new LabelView("debug_support_link", "Support and Documentation", "<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">HomeSeer Forum</a>"), 
 				new LabelView("debug_system_id", "System ID (include this with any support requests)", analytics.CustomSystemId),
