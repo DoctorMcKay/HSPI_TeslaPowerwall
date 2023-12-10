@@ -53,6 +53,8 @@
     </ItemGroup>
     <ItemGroup>
         <Compile Include="AnalyticsClient.cs" />
+        <Compile Include="Enums\PowerFlow.cs" />
+        <Compile Include="HsEvents\TeslaTrigger.cs" />
         <Compile Include="HSPI.cs" />
         <Compile Include="PowerwallClient.cs" />
         <Compile Include="Program.cs" />

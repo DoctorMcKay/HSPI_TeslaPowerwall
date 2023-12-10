@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Text.RegularExpressions;
@@ -7,7 +8,10 @@ using HomeSeer.Jui.Types;
 using HomeSeer.Jui.Views;
 using HomeSeer.PluginSdk;
 using HomeSeer.PluginSdk.Devices;
+using HomeSeer.PluginSdk.Events;
 using HomeSeer.PluginSdk.Logging;
+using HSPI_TeslaPowerwall.Enums;
+using HSPI_TeslaPowerwall.HsEvents;
 
 namespace HSPI_TeslaPowerwall;
 
@@ -21,14 +25,17 @@ public class HSPI : AbstractPlugin {
 	private PowerwallClient _client;
 	private string _gatewayIp = "";
 	private ushort _gatewayPort = 443;
-	private GatewayDeviceRefSet? _devRefSet = null;
 	private Timer _pollTimer;
 	private Timer _checkConnectionTimer;
 	private int _pollFailureCount = 0;
 	private bool _connectingToGateway = false;
+	private readonly Dictionary<int, int> _previousDeviceValues = new Dictionary<int, int>();
 	private bool _debugLogging;
 
 	public const bool ENABLE_ENERGY_INTEGRATION = false;
+	public const int POWER_THRESHOLD = 50; // Value in watts at which we decide that a device is drawing/exporting power
+
+	public GatewayDeviceRefSet? DevRefSet { get; private set; }
 
 	protected override void Initialize() {
 		WriteLog(ELogType.Trace, "Initialize");
@@ -64,6 +71,8 @@ public class HSPI : AbstractPlugin {
 		_debugLogging = HomeSeerSystem.GetINISetting("Debug", "debug_log", "0", SettingsFileName) == "1";
 			
 		CheckGatewayConnection();
+
+		TriggerTypes.AddTriggerType(typeof(TeslaTrigger));
 			
 		analytics.ReportIn(5000);
 	}
@@ -164,6 +173,10 @@ public class HSPI : AbstractPlugin {
 		// Nothing happens here as we update the status as events happen
 	}
 
+	internal IHsController GetHsController() {
+		return HomeSeerSystem;
+	}
+
 	private async void CheckGatewayConnection() {
 		_checkConnectionTimer?.Stop();
 		_checkConnectionTimer = null;
@@ -206,9 +219,9 @@ public class HSPI : AbstractPlugin {
 			Status = PluginStatus.Fatal($"Cannot contact Gateway: {GetInnermostException(ex).Message}");
 			_connectingToGateway = false;
 
-			if (_devRefSet != null) {
+			if (DevRefSet != null) {
 				// If _devRefSet isn't null, we're guaranteed to have all features inside of it
-				int statusRef = ((GatewayDeviceRefSet) _devRefSet).SystemStatus;
+				int statusRef = ((GatewayDeviceRefSet) DevRefSet).SystemStatus;
 				HomeSeerSystem.UpdateFeatureValueByRef(statusRef, 2); // error
 				HomeSeerSystem.UpdateFeatureValueStringByRef(statusRef, GetInnermostException(ex).Message);
 			}
@@ -415,7 +428,7 @@ public class HSPI : AbstractPlugin {
 			devRefSet.GridPower = (int) gridPower;
 		}
 
-		_devRefSet = devRefSet;
+		DevRefSet = devRefSet;
 	}
 
 	private void InitializeFeatureFactory(FeatureFactory factory) {
@@ -432,13 +445,13 @@ public class HSPI : AbstractPlugin {
 	private async void UpdateDeviceData() {
 		WriteLog(ELogType.Trace, "Retrieving Powerwall data");
 
-		if (_devRefSet == null) {
-			WriteLog(ELogType.Trace, "Skipping Powerwall data retrieval because we don't have our devRefSet");
+		if (DevRefSet == null) {
+			WriteLog(ELogType.Trace, "Skipping Powerwall data retrieval because we don't have our DevRefSet");
 			ResetPollTimer();
 			return;
 		}
 
-		GatewayDeviceRefSet refSet = (GatewayDeviceRefSet) _devRefSet;
+		GatewayDeviceRefSet refSet = (GatewayDeviceRefSet) DevRefSet;
 
 		try {
 			// Get only site master right now because if the system is down, we don't want to retrieve anything else
@@ -493,6 +506,33 @@ public class HSPI : AbstractPlugin {
 			HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
 			HomeSeerSystem.UpdateFeatureValueByRef(refSet.GridPower, Math.Round(aggregates.Site.InstantPower));
 			HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
+			
+			// Check if powerwall has transitioned to charging or discharging
+			if (_previousDeviceValues.ContainsKey(refSet.BatteryPower)) {
+				PowerFlow previous = GetPowerFlow(_previousDeviceValues[refSet.BatteryPower]);
+				PowerFlow now = GetPowerFlow((int) Math.Round(aggregates.Battery.InstantPower));
+
+				if (previous != now) {
+					switch (now) {
+						case PowerFlow.Negative:
+							ActivateTrigger(TeslaTrigger.SubTrigger.BatteryCharging);
+							break;
+						
+						case PowerFlow.Zero:
+							ActivateTrigger(TeslaTrigger.SubTrigger.BatteryIdle);
+							break;
+						
+						case PowerFlow.Positive:
+							ActivateTrigger(TeslaTrigger.SubTrigger.BatteryDischarging);
+							break;
+					}
+				}
+			}
+
+			_previousDeviceValues[refSet.SitePower] = (int) Math.Round(aggregates.Load.InstantPower);
+			_previousDeviceValues[refSet.BatteryPower] = (int) Math.Round(aggregates.Battery.InstantPower);
+			_previousDeviceValues[refSet.SolarPower] = (int) Math.Round(aggregates.Solar.InstantPower);
+			_previousDeviceValues[refSet.GridPower] = (int) Math.Round(aggregates.Site.InstantPower);
 
 			if (ENABLE_ENERGY_INTEGRATION) {
 				// Record energy data if we have some
@@ -521,7 +561,7 @@ public class HSPI : AbstractPlugin {
 	}
 
 	private void HandlePollFailure(string errorMessage) {
-		if (_devRefSet == null) {
+		if (DevRefSet == null) {
 			// Dunno how this is possible
 			WriteLog(ELogType.Error, $"Somehow we had a poll failure but no ref set available yet? {errorMessage}");
 			return;
@@ -532,7 +572,7 @@ public class HSPI : AbstractPlugin {
 			return;
 		}
 
-		int statusRef = ((GatewayDeviceRefSet) _devRefSet).SystemStatus;
+		int statusRef = ((GatewayDeviceRefSet) DevRefSet).SystemStatus;
 		// ReSharper disable once CompareOfFloatsByEqualityOperator
 		if (HomeSeerSystem.GetFeatureByRef(statusRef).Value == 2) {
 			// Status is already error
@@ -545,6 +585,16 @@ public class HSPI : AbstractPlugin {
 
 	private static string GetPowerString(double watts) {
 		return $"{Math.Round(watts / 1000, 1)} kW";
+	}
+
+	private void ActivateTrigger(TeslaTrigger.SubTrigger triggerType) {
+		WriteLog(ELogType.Debug, $"Activating trigger types: {triggerType}");
+		foreach (TrigActInfo trigActInfo in HomeSeerSystem.GetTriggersByType(Id, TeslaTrigger.TriggerNumber)) {
+			TeslaTrigger trigger = new TeslaTrigger(trigActInfo, this, _debugLogging);
+			if (trigger.SubTrig == triggerType) {
+				HomeSeerSystem.TriggerFire(Id, trigActInfo);
+			}
+		}
 	}
 
 	private static string GetExceptionMessageChain(Exception ex) {
@@ -581,6 +631,18 @@ public class HSPI : AbstractPlugin {
 		}
 			
 		HomeSeerSystem.WriteLog(logType, message, Name);
+	}
+
+	public static PowerFlow GetPowerFlow(int powerWatts) {
+		if (powerWatts >= POWER_THRESHOLD) {
+			return PowerFlow.Positive;
+		}
+		
+		if (powerWatts <= -POWER_THRESHOLD) {
+			return PowerFlow.Negative;
+		}
+
+		return PowerFlow.Zero;
 	}
 }
 
