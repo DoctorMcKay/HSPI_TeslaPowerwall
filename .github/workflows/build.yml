@@ -22,6 +22,11 @@ jobs:
       
     - name: Nuget restore
       run: nuget restore HSPI_TeslaPowerwall.sln
+
+    - name: Generate assembly version
+      uses: DoctorMcKay/action-csharp-majoryearweekbuild-version@v1
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
       
     - name: MSBuild
       run: |
@@ -33,8 +38,9 @@ jobs:
         mkdir artifacts
         cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
         cp HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
+        cp HSPI_TeslaPowerwall\bin\Release\*.dll artifacts
         cp install.txt artifacts\install.txt
-        Set-Variable -Name release_version -Value (Get-ChildItem -Filter "artifacts\HSPI_TeslaPowerwall.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
+        $release_version = (Get-ChildItem -Filter "artifacts\HSPI_IRobot.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
         echo "release_version=$release_version"
         echo "release_version=$release_version" >> $env:GITHUB_ENV
     
@@ -43,6 +49,7 @@ jobs:
         mkdir artifacts-debug
         cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts-debug\HSPI_TeslaPowerwall.exe"
         cp HSPI_TeslaPowerwall.exe.config artifacts-debug\HSPI_TeslaPowerwall.exe.config
+        cp HSPI_TeslaPowerwall\bin\Debug\*.dll artifacts-debug
     
     - name: Upload artifacts
       uses: actions/upload-artifact@v3

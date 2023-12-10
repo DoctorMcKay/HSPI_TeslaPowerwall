@@ -1,2 +1,5 @@
 HSPI_TeslaPowerwall.exe,.,0
 HSPI_TeslaPowerwall.exe.config,.,0
+HSCF.dll,.\bin\TeslaPowerwall,0
+Newtonsoft.Json.dll,.\bin\TeslaPowerwall,0
+PluginSdk.dll,.\bin\TeslaPowerwall,0
