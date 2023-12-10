@@ -528,6 +528,46 @@ public class HSPI : AbstractPlugin {
 					}
 				}
 			}
+			
+			// Check if solar has transitioned to producing or idle
+			if (_previousDeviceValues.ContainsKey(refSet.SolarPower)) {
+				PowerFlow previous = GetPowerFlow(_previousDeviceValues[refSet.SolarPower]);
+				PowerFlow now = GetPowerFlow((int) Math.Round(aggregates.Solar.InstantPower));
+
+				if (previous != now) {
+					switch (now) {
+						case PowerFlow.Positive:
+							ActivateTrigger(TeslaTrigger.SubTrigger.SolarProducing);
+							break;
+						
+						case PowerFlow.Zero:
+							ActivateTrigger(TeslaTrigger.SubTrigger.SolarIdle);
+							break;
+					}
+				}
+			}
+			
+			// Check if powerwall has transitioned to importing or exporting
+			if (_previousDeviceValues.ContainsKey(refSet.GridPower)) {
+				PowerFlow previous = GetPowerFlow(_previousDeviceValues[refSet.GridPower]);
+				PowerFlow now = GetPowerFlow((int) Math.Round(aggregates.Site.InstantPower));
+
+				if (previous != now) {
+					switch (now) {
+						case PowerFlow.Negative:
+							ActivateTrigger(TeslaTrigger.SubTrigger.GridExporting);
+							break;
+						
+						case PowerFlow.Zero:
+							ActivateTrigger(TeslaTrigger.SubTrigger.GridIdle);
+							break;
+						
+						case PowerFlow.Positive:
+							ActivateTrigger(TeslaTrigger.SubTrigger.GridImporting);
+							break;
+					}
+				}
+			}
 
 			_previousDeviceValues[refSet.SitePower] = (int) Math.Round(aggregates.Load.InstantPower);
 			_previousDeviceValues[refSet.BatteryPower] = (int) Math.Round(aggregates.Battery.InstantPower);

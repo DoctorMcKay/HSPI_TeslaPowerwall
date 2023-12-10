@@ -19,7 +19,12 @@ public class TeslaTrigger : AbstractTriggerType2 {
 	protected override List<string> SubTriggerTypeNames { get; set; } = new List<string> {
 		"Powerwall begins/is charging",
 		"Powerwall begins/is discharging",
-		"Powerwall becomes/is idle"
+		"Powerwall becomes/is idle",
+		"Solar begins/is producing",
+		"Solar becomes/is idle",
+		"Grid begins/is importing",
+		"Grid begins/is exporting",
+		"Grid becomes/is idle"
 	};
 
 	private string OptionIdExplainTrigger => $"{PageId}-ExplainTrig";
@@ -75,6 +80,31 @@ public class TeslaTrigger : AbstractTriggerType2 {
 				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your Powerwall becomes idle (neither charging nor discharging)");
 				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your Powerwall is currently idle (neither charging nor discharging)");
 				break;
+			
+			case SubTrigger.SolarProducing:
+				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your solar panels begin producing power");
+				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your solar panels are currently producing power");
+				break;
+			
+			case SubTrigger.SolarIdle:
+				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your solar panels stop producing power");
+				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your solar panels are currently not producing power");
+				break;
+			
+			case SubTrigger.GridImporting:
+				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your home begins importing/buying power from the grid");
+				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your home is currently importing/buying power from the grid");
+				break;
+			
+			case SubTrigger.GridExporting:
+				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your home begins exporting/selling power to the grid");
+				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your home is currently exporting/selling power to the grid");
+				break;
+			
+			case SubTrigger.GridIdle:
+				factory.WithLabel(OptionIdExplainTrigger, "When used as a trigger (WHEN/OR WHEN)", "Triggers the event when your home stops importing or exporting power to or from the grid (as is the case when excess solar is charging your Powerwall, or during a grid outage)");
+				factory.WithLabel(OptionIdExplainCondition, "When used as a condition (IF/AND IF)", "Passes if your home is currently not importing or exporting power to or from the grid (as is the case when excess solar is charging your Powerwall, or during a grid outage)");
+				break;
 		}
 		
 		ConfigPage = factory.Page;
@@ -90,7 +120,11 @@ public class TeslaTrigger : AbstractTriggerType2 {
 	}
 
 	public override string GetPrettyString() {
-		string triggerName = SubTriggerTypeNames[SelectedSubTriggerIndex].Substring("Powerwall ".Length);
+		string triggerName = SubTriggerTypeNames[SelectedSubTriggerIndex];
+		string[] words = triggerName.Split(' ');
+		string subject = words[0];
+		triggerName = string.Join(" ", words.Skip(1));
+		
 		bool? isCondition = _triggerIsCondition();
 
 		if (isCondition != null) {
@@ -108,10 +142,30 @@ public class TeslaTrigger : AbstractTriggerType2 {
 				case SubTrigger.BatteryIdle:
 					triggerName = isTrigger ? "becomes idle" : "is idle";
 					break;
+				
+				case SubTrigger.SolarProducing:
+					triggerName = isTrigger ? "begins producing" : "is producing";
+					break;
+				
+				case SubTrigger.SolarIdle:
+					triggerName = isTrigger ? "becomes idle" : "is idle";
+					break;
+				
+				case SubTrigger.GridImporting:
+					triggerName = isTrigger ? "begins importing" : "is importing";
+					break;
+				
+				case SubTrigger.GridExporting:
+					triggerName = isTrigger ? "begins exporting" : "is exporting";
+					break;
+				
+				case SubTrigger.GridIdle:
+					triggerName = isTrigger ? "becomes idle" : "is idle" ;
+					break;
 			}
 		}
 
-		return $"Tesla: Powerwall <font class=\"event_Txt_Selection\">{triggerName}</font>";
+		return $"Tesla: {subject} <font class=\"event_Txt_Selection\">{triggerName}</font>";
 	}
 
 	public override bool IsTriggerTrue(bool isCondition) {
@@ -124,16 +178,49 @@ public class TeslaTrigger : AbstractTriggerType2 {
 					return false;
 				}
 
-				int powerwallPowerValue = (int) Math.Round((float) Plugin.GetHsController().GetPropertyByRef((int) powerwallRef, EProperty.Value));
-				PowerFlow flow = HSPI.GetPowerFlow(powerwallPowerValue);
+				int powerwallPowerValue = (int) Math.Round((double) Plugin.GetHsController().GetPropertyByRef(powerwallRef.Value, EProperty.Value));
+				PowerFlow batteryFlow = HSPI.GetPowerFlow(powerwallPowerValue);
 
 				if (SubTrig == SubTrigger.BatteryIdle) {
-					return flow == PowerFlow.Zero;
+					return batteryFlow == PowerFlow.Zero;
 				}
 				
 				return SubTrig == SubTrigger.BatteryCharging
-					? flow == PowerFlow.Negative        // Powerwall is charging if its value is below -50W
-					: flow == PowerFlow.Positive;       // Powerwall is discharging if its value is above 50W
+					? batteryFlow == PowerFlow.Negative        // Powerwall is charging if its value is below -50W
+					: batteryFlow == PowerFlow.Positive;       // Powerwall is discharging if its value is above 50W
+			
+			case SubTrigger.SolarProducing:
+			case SubTrigger.SolarIdle:
+				int? solarRef = Plugin.DevRefSet?.SolarPower;
+				if (solarRef == null) {
+					return false;
+				}
+
+				int solarPowerValue = (int) Math.Round((double) Plugin.GetHsController().GetPropertyByRef(solarRef.Value, EProperty.Value));
+				PowerFlow solarFlow = HSPI.GetPowerFlow(solarPowerValue);
+
+				return SubTrig == SubTrigger.SolarProducing
+					? solarFlow == PowerFlow.Positive
+					: solarFlow == PowerFlow.Zero;
+			
+			case SubTrigger.GridImporting:
+			case SubTrigger.GridExporting:
+			case SubTrigger.GridIdle:
+				int? gridRef = Plugin.DevRefSet?.GridPower;
+				if (gridRef == null) {
+					return false;
+				}
+
+				int gridPowerValue = (int) Math.Round((double) Plugin.GetHsController().GetPropertyByRef(gridRef.Value, EProperty.Value));
+				PowerFlow gridFlow = HSPI.GetPowerFlow(gridPowerValue);
+
+				if (SubTrig == SubTrigger.GridIdle) {
+					return gridFlow == PowerFlow.Zero;
+				}
+				
+				return SubTrig == SubTrigger.GridImporting
+					? gridFlow == PowerFlow.Positive
+					: gridFlow == PowerFlow.Negative;
 			
 			default:
 				return false;
@@ -211,6 +298,11 @@ public class TeslaTrigger : AbstractTriggerType2 {
 	public enum SubTrigger : int {
 		BatteryCharging = 0,
 		BatteryDischarging,
-		BatteryIdle
+		BatteryIdle,
+		SolarProducing,
+		SolarIdle,
+		GridImporting,
+		GridExporting,
+		GridIdle
 	}
 }
