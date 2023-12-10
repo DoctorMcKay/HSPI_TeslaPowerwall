@@ -654,7 +654,7 @@ public class HSPI : AbstractPlugin {
 	}
 
 	public void WriteLog(ELogType logType, string message, [CallerLineNumber] int lineNumber = 0, [CallerMemberName] string caller = null) {
-		_analyticsClient.WriteLog(logType, message, lineNumber, caller);
+		_analyticsClient?.WriteLog(logType, message, lineNumber, caller);
 		
 		#if DEBUG
 			bool isDebugMode = true;
