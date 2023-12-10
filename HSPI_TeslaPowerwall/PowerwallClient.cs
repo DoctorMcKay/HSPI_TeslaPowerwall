@@ -7,6 +7,8 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
+using HomeSeer.PluginSdk;
+using HomeSeer.PluginSdk.Energy;
 using HomeSeer.PluginSdk.Logging;
 
 namespace HSPI_TeslaPowerwall
@@ -25,6 +27,9 @@ namespace HSPI_TeslaPowerwall
         private readonly HSPI _hs;
         private readonly string _email;
         private readonly string _password;
+
+        private EnergyMeterSnapshot? _siteSnapshot = null;
+        private EnergyMeterSnapshot? _solarSnapshot = null;
 
         public PowerwallClient(string ipAddress, ushort port, HSPI hs, string email, string password) {
             _ipAddress = ipAddress;
@@ -143,13 +148,56 @@ namespace HSPI_TeslaPowerwall
 
         public async Task<Aggregates> GetAggregates() {
             dynamic content = await GetApiContent("/meters/aggregates", true);
-            return new Aggregates
+            Aggregates aggregates = new Aggregates
             {
                 Site = GetAggregateEntry(content["site"]),
                 Battery = GetAggregateEntry(content["battery"]),
                 Load = GetAggregateEntry(content["load"]),
                 Solar = content.ContainsKey("solar") ? GetAggregateEntry(content["solar"]) : GetBlankAggregateEntry()
             };
+
+            EnergyMeterSnapshot siteSnapshot = new EnergyMeterSnapshot {
+                Timestamp = DateTime.Now,
+                EnergyExported = aggregates.Site.EnergyExported,
+                EnergyImported = aggregates.Site.EnergyImported
+            };
+
+            EnergyMeterSnapshot solarSnapshot = new EnergyMeterSnapshot {
+                Timestamp = DateTime.Now,
+                EnergyExported = aggregates.Solar.EnergyExported,
+                EnergyImported = aggregates.Solar.EnergyImported
+            };
+
+            if (_siteSnapshot != null) {
+                EnergyMeterSnapshot prev = _siteSnapshot.Value;
+                double kWh = (siteSnapshot.EnergyImported - prev.EnergyImported - (siteSnapshot.EnergyExported - prev.EnergyExported)) / 1000;
+                aggregates.SiteEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Consumed : Constants.enumEnergyDirection.Produced) {
+                    // The docs claim that Amount is "Watts" but it appears that it should actually be kWh
+                    Amount = Math.Abs(kWh),
+                    Amount_End = siteSnapshot.Timestamp,
+                    Amount_Start = prev.Timestamp,
+                    Device = Constants.enumEnergyDevice.Meter_Service,
+                    // The docs claim that Rate is "kWH" but it seems to be kW
+                    //Rate = Math.Abs((float) aggregates.Site.InstantPower / 1000)
+                };
+            }
+
+            if (_solarSnapshot != null) {
+                EnergyMeterSnapshot prev = _solarSnapshot.Value;
+                double kWh = (solarSnapshot.EnergyExported - prev.EnergyExported - (solarSnapshot.EnergyImported - prev.EnergyImported)) / 1000;
+                aggregates.SolarEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Produced : Constants.enumEnergyDirection.Consumed) {
+                    Amount = Math.Abs(kWh),
+                    Amount_End = solarSnapshot.Timestamp,
+                    Amount_Start = prev.Timestamp,
+                    Device = Constants.enumEnergyDevice.Solar_Panel,
+                    //Rate = Math.Abs((float) aggregates.Solar.InstantPower / 1000)
+                };
+            }
+
+            _siteSnapshot = siteSnapshot;
+            _solarSnapshot = solarSnapshot;
+
+            return aggregates;
         }
 
         private static Aggregates.Entry GetAggregateEntry(dynamic content) {
@@ -246,6 +294,12 @@ namespace HSPI_TeslaPowerwall
                 } // using HttpResponseMessage
             } // using HttpRequestMessage
         }
+        
+        private struct EnergyMeterSnapshot {
+            public DateTime Timestamp;
+            public double EnergyExported;
+            public double EnergyImported;
+        }
     }
 
     public struct SiteInfo {
@@ -276,6 +330,9 @@ namespace HSPI_TeslaPowerwall
         public Entry Battery;
         public Entry Load;
         public Entry Solar;
+
+        public EnergyData SiteEnergyData;
+        public EnergyData SolarEnergyData;
     }
 
     public struct GridStatus {
