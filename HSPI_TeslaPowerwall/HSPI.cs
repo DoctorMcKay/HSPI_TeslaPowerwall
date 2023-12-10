@@ -32,6 +32,8 @@ public class HSPI : AbstractPlugin {
 	private readonly Dictionary<int, int> _previousDeviceValues = new Dictionary<int, int>();
 	private bool _debugLogging;
 
+	private AnalyticsClient _analyticsClient;
+
 	public const bool ENABLE_ENERGY_INTEGRATION = false;
 	public const int POWER_THRESHOLD = 50; // Value in watts at which we decide that a device is drawing/exporting power
 
@@ -40,7 +42,7 @@ public class HSPI : AbstractPlugin {
 	protected override void Initialize() {
 		WriteLog(ELogType.Trace, "Initialize");
 			
-		AnalyticsClient analytics = new AnalyticsClient(this, HomeSeerSystem);
+		_analyticsClient = new AnalyticsClient(this, HomeSeerSystem);
 			
 		// Build the settings page
 		PageFactory settingsPageFactory = PageFactory
@@ -55,7 +57,7 @@ public class HSPI : AbstractPlugin {
 			.WithLabel("auth_note_2", "", "<b>These credentials <u>are not</u> your Tesla.com or Tesla app credentials.</b> These credentials are set in the Gateway's web administration panel, which can be accessed at https://your.gateway.ip on your local network.")
 			.WithGroup("debug_group", "<hr>", new AbstractView[] {
 				new LabelView("debug_support_link", "Support and Documentation", "<a href=\"https://forums.homeseer.com/forum/energy-management-plug-ins/energy-management-discussion/tesla-powerwall-dr-mckay\" target=\"_blank\">HomeSeer Forum</a>"), 
-				new LabelView("debug_system_id", "System ID (include this with any support requests)", analytics.CustomSystemId),
+				new LabelView("debug_system_id", "System ID (include this with any support requests)", _analyticsClient.CustomSystemId),
 				#if DEBUG
 					new LabelView("debug_log", "Enable Debug Logging", "ON - DEBUG BUILD")
 				#else
@@ -73,7 +75,7 @@ public class HSPI : AbstractPlugin {
 
 		TriggerTypes.AddTriggerType(typeof(TeslaTrigger));
 			
-		analytics.ReportIn(5000);
+		_analyticsClient.ReportIn(5000);
 	}
 
 	protected override void OnSettingsLoad() {
@@ -652,6 +654,8 @@ public class HSPI : AbstractPlugin {
 	}
 
 	public void WriteLog(ELogType logType, string message, [CallerLineNumber] int lineNumber = 0, [CallerMemberName] string caller = null) {
+		_analyticsClient.WriteLog(logType, message, lineNumber, caller);
+		
 		#if DEBUG
 			bool isDebugMode = true;
 
