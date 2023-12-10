@@ -156,46 +156,48 @@ namespace HSPI_TeslaPowerwall
                 Solar = content.ContainsKey("solar") ? GetAggregateEntry(content["solar"]) : GetBlankAggregateEntry()
             };
 
-            EnergyMeterSnapshot siteSnapshot = new EnergyMeterSnapshot {
-                Timestamp = DateTime.Now,
-                EnergyExported = aggregates.Site.EnergyExported,
-                EnergyImported = aggregates.Site.EnergyImported
-            };
-
-            EnergyMeterSnapshot solarSnapshot = new EnergyMeterSnapshot {
-                Timestamp = DateTime.Now,
-                EnergyExported = aggregates.Solar.EnergyExported,
-                EnergyImported = aggregates.Solar.EnergyImported
-            };
-
-            if (_siteSnapshot != null) {
-                EnergyMeterSnapshot prev = _siteSnapshot.Value;
-                double kWh = (siteSnapshot.EnergyImported - prev.EnergyImported - (siteSnapshot.EnergyExported - prev.EnergyExported)) / 1000;
-                aggregates.SiteEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Consumed : Constants.enumEnergyDirection.Produced) {
-                    // The docs claim that Amount is "Watts" but it appears that it should actually be kWh
-                    Amount = Math.Abs(kWh),
-                    Amount_End = siteSnapshot.Timestamp,
-                    Amount_Start = prev.Timestamp,
-                    Device = Constants.enumEnergyDevice.Meter_Service,
-                    // The docs claim that Rate is "kWH" but it seems to be kW
-                    //Rate = Math.Abs((float) aggregates.Site.InstantPower / 1000)
+            if (HSPI.ENABLE_ENERGY_INTEGRATION) {
+                EnergyMeterSnapshot siteSnapshot = new EnergyMeterSnapshot {
+                    Timestamp = DateTime.Now,
+                    EnergyExported = aggregates.Site.EnergyExported,
+                    EnergyImported = aggregates.Site.EnergyImported
                 };
-            }
 
-            if (_solarSnapshot != null) {
-                EnergyMeterSnapshot prev = _solarSnapshot.Value;
-                double kWh = (solarSnapshot.EnergyExported - prev.EnergyExported - (solarSnapshot.EnergyImported - prev.EnergyImported)) / 1000;
-                aggregates.SolarEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Produced : Constants.enumEnergyDirection.Consumed) {
-                    Amount = Math.Abs(kWh),
-                    Amount_End = solarSnapshot.Timestamp,
-                    Amount_Start = prev.Timestamp,
-                    Device = Constants.enumEnergyDevice.Solar_Panel,
-                    //Rate = Math.Abs((float) aggregates.Solar.InstantPower / 1000)
+                EnergyMeterSnapshot solarSnapshot = new EnergyMeterSnapshot {
+                    Timestamp = DateTime.Now,
+                    EnergyExported = aggregates.Solar.EnergyExported,
+                    EnergyImported = aggregates.Solar.EnergyImported
                 };
-            }
 
-            _siteSnapshot = siteSnapshot;
-            _solarSnapshot = solarSnapshot;
+                if (_siteSnapshot != null) {
+                    EnergyMeterSnapshot prev = _siteSnapshot.Value;
+                    double kWh = (siteSnapshot.EnergyImported - prev.EnergyImported - (siteSnapshot.EnergyExported - prev.EnergyExported)) / 1000;
+                    aggregates.SiteEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Consumed : Constants.enumEnergyDirection.Produced) {
+                        // The docs claim that Amount is "Watts" but it appears that it should actually be kWh
+                        Amount = Math.Abs(kWh),
+                        Amount_End = siteSnapshot.Timestamp,
+                        Amount_Start = prev.Timestamp,
+                        Device = Constants.enumEnergyDevice.Meter_Service,
+                        // The docs claim that Rate is "kWH" but it seems to be kW
+                        //Rate = Math.Abs((float) aggregates.Site.InstantPower / 1000)
+                    };
+                }
+
+                if (_solarSnapshot != null) {
+                    EnergyMeterSnapshot prev = _solarSnapshot.Value;
+                    double kWh = (solarSnapshot.EnergyExported - prev.EnergyExported - (solarSnapshot.EnergyImported - prev.EnergyImported)) / 1000;
+                    aggregates.SolarEnergyData = new EnergyData(kWh >= 0 ? Constants.enumEnergyDirection.Produced : Constants.enumEnergyDirection.Consumed) {
+                        Amount = Math.Abs(kWh),
+                        Amount_End = solarSnapshot.Timestamp,
+                        Amount_Start = prev.Timestamp,
+                        Device = Constants.enumEnergyDevice.Solar_Panel,
+                        //Rate = Math.Abs((float) aggregates.Solar.InstantPower / 1000)
+                    };
+                }
+
+                _siteSnapshot = siteSnapshot;
+                _solarSnapshot = solarSnapshot;
+            }
 
             return aggregates;
         }

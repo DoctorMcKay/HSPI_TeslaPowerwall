@@ -29,6 +29,8 @@ namespace HSPI_TeslaPowerwall
 		private bool _connectingToGateway = false;
 		private bool _debugLogging;
 
+		public const bool ENABLE_ENERGY_INTEGRATION = false;
+
 		protected override void Initialize() {
 			WriteLog(ELogType.Trace, "Initialize");
 			
@@ -492,22 +494,24 @@ namespace HSPI_TeslaPowerwall
 				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.SolarPower, GetPowerString(aggregates.Solar.InstantPower));
 				HomeSeerSystem.UpdateFeatureValueByRef(refSet.GridPower, Math.Round(aggregates.Site.InstantPower));
 				HomeSeerSystem.UpdateFeatureValueStringByRef(refSet.GridPower, GetPowerString(aggregates.Site.InstantPower));
-				
-				// Record energy data if we have some
-				if (aggregates.SiteEnergyData != null) {
-					WriteLog(ELogType.Trace, $"Recording energy data ({aggregates.SiteEnergyData.Amount * 1000} Wh) for site {refSet.GridPower}");
-					aggregates.SiteEnergyData.dvRef = refSet.GridPower;
-					HomeSeerSystem.Energy_AddData(refSet.GridPower, aggregates.SiteEnergyData);
-				} else {
-					HomeSeerSystem.Energy_SetEnergyDevice(refSet.GridPower, Constants.enumEnergyDevice.Meter_Service);
-				}
 
-				if (aggregates.SolarEnergyData != null) {
-					WriteLog(ELogType.Trace, $"Recording energy data ({aggregates.SolarEnergyData.Amount * 1000} Wh) for solar {refSet.SolarPower}");
-					aggregates.SolarEnergyData.dvRef = refSet.SolarPower;
-					HomeSeerSystem.Energy_AddData(refSet.SolarPower, aggregates.SolarEnergyData);
-				} else {
-					HomeSeerSystem.Energy_SetEnergyDevice(refSet.SolarPower, Constants.enumEnergyDevice.Solar_Panel);
+				if (ENABLE_ENERGY_INTEGRATION) {
+					// Record energy data if we have some
+					if (aggregates.SiteEnergyData != null) {
+						WriteLog(ELogType.Trace, $"Recording energy data ({aggregates.SiteEnergyData.Amount * 1000} Wh) for site {refSet.GridPower}");
+						aggregates.SiteEnergyData.dvRef = refSet.GridPower;
+						HomeSeerSystem.Energy_AddData(refSet.GridPower, aggregates.SiteEnergyData);
+					} else {
+						HomeSeerSystem.Energy_SetEnergyDevice(refSet.GridPower, Constants.enumEnergyDevice.Meter_Service);
+					}
+
+					if (aggregates.SolarEnergyData != null) {
+						WriteLog(ELogType.Trace, $"Recording energy data ({aggregates.SolarEnergyData.Amount * 1000} Wh) for solar {refSet.SolarPower}");
+						aggregates.SolarEnergyData.dvRef = refSet.SolarPower;
+						HomeSeerSystem.Energy_AddData(refSet.SolarPower, aggregates.SolarEnergyData);
+					} else {
+						HomeSeerSystem.Energy_SetEnergyDevice(refSet.SolarPower, Constants.enumEnergyDevice.Solar_Panel);
+					}
 				}
 			} catch (Exception ex) {
 				WriteLog(ELogType.Error, $"Unable to update Powerwall data: {GetExceptionMessageChain(ex)}");
