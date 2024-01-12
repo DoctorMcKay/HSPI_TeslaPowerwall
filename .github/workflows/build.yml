@@ -37,7 +37,7 @@ jobs:
       run: |
         mkdir artifacts
         cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe artifacts\HSPI_TeslaPowerwall.exe
-        cp HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
+        cp HSPI_TeslaPowerwall\bin\Release\HSPI_TeslaPowerwall.exe.config artifacts\HSPI_TeslaPowerwall.exe.config
         cp HSPI_TeslaPowerwall\bin\Release\*.dll artifacts
         cp install.txt artifacts\install.txt
         $release_version = (Get-ChildItem -Filter "artifacts\HSPI_TeslaPowerwall.exe" | Select-Object -ExpandProperty VersionInfo).FileVersion.Replace('.', '-')
@@ -47,8 +47,8 @@ jobs:
     - name: Stage debug artifacts
       run: |
         mkdir artifacts-debug
-        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe "artifacts-debug\HSPI_TeslaPowerwall.exe"
-        cp HSPI_TeslaPowerwall.exe.config artifacts-debug\HSPI_TeslaPowerwall.exe.config
+        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe artifacts-debug\HSPI_TeslaPowerwall.exe
+        cp HSPI_TeslaPowerwall\bin\Debug\HSPI_TeslaPowerwall.exe.config artifacts-debug\HSPI_TeslaPowerwall.exe.config
         cp HSPI_TeslaPowerwall\bin\Debug\*.dll artifacts-debug
     
     - name: Upload artifacts
